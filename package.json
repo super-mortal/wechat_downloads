@@ -1,0 +1,23 @@
+{
+  "name": "wechat_downloads",
+  "version": "1.0.0",
+  "description": "免费公众号下载器：在本机浏览器渲染文章，导出 HTML / Markdown / PDF。",
+  "main": "cli.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "cli": "node cli.mjs"
+  },
+  "keywords": [
+    "wechat",
+    "article",
+    "archiver",
+    "free",
+    "下载器"
+  ],
+  "author": "supermortal",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}

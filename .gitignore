@@ -1,0 +1,20 @@
+# 依赖
+node_modules/
+
+# 运行时输出 / 日志
+downloads/
+out/
+server.log
+*.log
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# 测试 / 临时
+*.tmp
+*.bak
+*~
