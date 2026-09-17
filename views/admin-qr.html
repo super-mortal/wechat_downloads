@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>微信扫码绑定 · wechat-downloads</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 fill=%27%23FDFBF7%27 stroke=%27%231A1A1A%27 stroke-width=%274%27/><text x=%2732%27 y=%2746%27 text-anchor=%27middle%27 font-family=%27serif%27 font-weight=%27900%27 font-size=%2740%27 fill=%27%231A1A1A%27>免</text></svg>">
+<style>
+:root{--paper:#FDFBF7;--paper-deep:#F5F5F5;--ink:#1A1A1A;--pencil:#4A4A4A;--soft:#9a9a9a;--border:#E0E0E0;--hl:#FFFF00;--accent:#7A4A20;--err:#A93226;--ok:#1F6B3A;
+  --reading:"Noto Serif SC",Georgia,"Songti SC",serif;--motion:none;}
+*,*::before,*::after{box-sizing:border-box;transition:none !important;animation:none !important;}
+html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:var(--reading);font-size:17px;line-height:1.8;}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27140%27 height=%27140%27%3E%3Cfilter id=%27n%27%3E%3CfeTurbulence type=%27fractalNoise%27 baseFrequency=%270.9%27 numOctaves=%272%27/%3E%3CfeColorMatrix values=%270 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.05 0%27/%3E%3C/filter%3E%3Crect width=%27140%27 height=%27140%27 filter=%27url(%23n)%27/%3E%3C/svg%3E");}
+a{color:inherit;text-decoration:none;border-bottom:1px solid transparent;}
+a:hover{border-bottom-color:var(--ink);}
+.wrap{max-width:720px;margin:0 auto;padding:0 24px;position:relative;z-index:1;}
+header{border-bottom:1px solid var(--ink);background:var(--paper);padding:24px 0;}
+.hd-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:18px;}
+.brand{font-weight:900;font-size:22px;letter-spacing:.05em;}
+.brand .mark{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:2px solid var(--ink);border-radius:4px;font-weight:900;font-size:20px;background:var(--paper);color:var(--ink);vertical-align:middle;margin-right:10px;font-family:"Noto Serif SC",Georgia,"Songti SC",serif;line-height:1;}
+.hd-links{display:flex;gap:10px;flex-wrap:wrap;}
+.blog-link{font-size:13px;color:var(--pencil);letter-spacing:.15em;border:1px solid var(--ink);padding:6px 14px;border-radius:3px;text-decoration:none;}
+.blog-link:hover{background:var(--ink);color:var(--paper);}
+.stage{margin:48px 0 18px;display:flex;align-items:center;justify-content:center;gap:14px;font-size:13px;letter-spacing:.3em;color:var(--pencil);text-transform:uppercase;}
+.stage .dot{width:10px;height:10px;border:1.5px solid var(--ink);border-radius:50%;background:var(--paper);}
+.stage .dot.on{background:var(--ink);}
+.stage .dot.live::after{content:"·";position:absolute;}
+.qrbox{margin:0 auto 26px;max-width:300px;border:1px solid var(--ink);background:var(--paper);padding:22px;border-radius:3px;text-align:center;}
+.qrbox .frame{width:100%;aspect-ratio:1/1;background:var(--paper-deep);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--soft);font-size:13px;letter-spacing:.1em;position:relative;overflow:hidden;}
+.qrbox img,.qrbox canvas{max-width:100%;max-height:100%;display:block;margin:0 auto;}
+.qrbox .url{font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--pencil);word-break:break-all;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);text-align:left;display:none;}
+.qrbox .url.show{display:block;}
+.status{text-align:center;margin:0 0 24px;font-size:18px;letter-spacing:.05em;}
+.status .tag{display:inline-block;padding:4px 12px;border:1px solid var(--ink);border-radius:3px;font-size:12px;letter-spacing:.3em;margin-right:10px;vertical-align:middle;text-transform:uppercase;}
+.status.wait{color:var(--pencil);}
+.status.wait .tag{color:var(--paper);background:var(--ink);border-color:var(--ink);}
+.status.scanned{color:var(--accent);}
+.status.scanned .tag{color:var(--paper);background:var(--accent);border-color:var(--accent);}
+.status.confirmed{color:var(--ok);}
+.status.confirmed .tag{color:var(--paper);background:var(--ok);border-color:var(--ok);}
+.status.expired{color:var(--err);}
+.status.expired .tag{color:var(--paper);background:var(--err);border-color:var(--err);}
+.actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:14px 0 36px;}
+.btn{font:600 14px/1 var(--reading);letter-spacing:.1em;color:var(--ink);background:var(--paper);border:1px solid var(--ink);padding:12px 22px;border-radius:3px;cursor:pointer;text-decoration:none;}
+.btn:hover{background:var(--ink);color:var(--paper);}
+.btn-primary{background:var(--ink);color:var(--paper);}
+.btn-primary:hover{background:var(--paper);color:var(--ink);}
+.err{font:13px/1.6 ui-monospace,Consolas,monospace;color:var(--err);margin:0 auto 24px;max-width:540px;padding:12px 14px;border-left:3px solid var(--err);background:var(--paper-deep);border-radius:0 3px 3px 0;display:none;}
+.err.show{display:block;}
+.note{font-size:13px;color:var(--pencil);text-align:center;margin:0 0 36px;}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 18px;font:13px/1.7 ui-monospace,Consolas,monospace;color:var(--pencil);margin:6px 0 0;}
+.kv b{color:var(--ink);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="hd-row">
+      <div class="brand"><span class="mark">免</span>wechat-downloads · 扫码绑定</div>
+      <div class="hd-links">
+        <a class="blog-link" href="/admin">← 说明页</a>
+        <a class="blog-link" href="/">首页</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="stage" id="stage">
+      <span class="dot on" id="dot-start"></span><span>开始</span>
+      <span class="dot" id="dot-wait"></span><span>等待扫码</span>
+      <span class="dot" id="dot-confirmed"></span><span>已确认</span>
+    </div>
+
+    <div class="qrbox">
+      <div class="frame" id="qr-frame">
+        <span id="qr-placeholder">正在申请二维码…</span>
+        <canvas id="qr-canvas" style="display:none;"></canvas>
+        <img id="qr-img" alt="微信登录二维码" style="display:none;"/>
+      </div>
+      <div class="url" id="qr-url"></div>
+    </div>
+
+    <p class="status wait" id="status">
+      <span class="tag" id="status-tag">WAIT</span>
+      <span id="status-text">等待扫码</span>
+    </p>
+
+    <div class="err" id="err"></div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-restart" style="display:none;">重新申请二维码</button>
+      <a class="btn" id="btn-home" href="/">回到首页</a>
+    </div>
+
+    <p class="note" id="note">二维码有效期 5 分钟；每 2 秒自动检测扫码状态。</p>
+
+    <div class="kv" id="kv" style="display:none;">
+      <b>session</b><span id="kv-session"></span>
+      <b>request_id</b><span id="kv-request"></span>
+    </div>
+  </main>
+</div>
+
+<!-- 客户端 QR 渲染：qrcode-generator（自包含，~12KB） -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+
+<script>
+(function () {
+  var POLL_INTERVAL_MS = 2000;
+  var $ = function (id) { return document.getElementById(id); };
+  var qrFrame = $("qr-frame");
+  var qrPlaceholder = $("qr-placeholder");
+  var qrCanvas = $("qr-canvas");
+  var qrImg = $("qr-img");
+  var qrUrl = $("qr-url");
+  var statusEl = $("status");
+  var statusTag = $("status-tag");
+  var statusText = $("status-text");
+  var errEl = $("err");
+  var btnRestart = $("btn-restart");
+  var note = $("note");
+  var kvEl = $("kv");
+  var kvSession = $("kv-session");
+  var kvRequest = $("kv-request");
+  var stageDots = {
+    wait: $("dot-wait"),
+    scanned: $("dot-wait"),
+    confirmed: $("dot-confirmed"),
+    expired: $("dot-confirmed"),
+  };
+
+  var sessionKey = null;
+  var pollTimer = null;
+
+  function setStatus(name, text) {
+    statusEl.className = "status " + name;
+    statusTag.textContent = name.toUpperCase();
+    statusText.textContent = text;
+    Object.keys(stageDots).forEach(function (k) {
+      stageDots[k].classList.toggle("on", k === name || (name === "scanned" && k === "wait") || (name === "expired" && k === "confirmed"));
+    });
+  }
+
+  function showError(payload) {
+    errEl.classList.add("show");
+    errEl.textContent = "[" + payload.error_code + "] " + payload.message + " · stage=" + payload.stage + " · request_id=" + payload.request_id;
+  }
+
+  function clearError() { errEl.classList.remove("show"); errEl.textContent = ""; }
+
+  function renderQr(qrcodeUrl) {
+    qrPlaceholder.style.display = "none";
+    qrCanvas.style.display = "none";
+    qrImg.style.display = "none";
+
+    // 1) data:image/png;base64,... → 直接 <img>
+    if (/^data:image\//i.test(qrcodeUrl)) {
+      qrImg.src = qrcodeUrl;
+      qrImg.style.display = "block";
+      qrUrl.classList.remove("show");
+      return;
+    }
+
+    // 2) http(s) 链接 → 客户端 QR 编码（字符串）
+    if (typeof qrcode === "function" || (window.qrcode && typeof window.qrcode === "function")) {
+      try {
+        var q = qrcode(0, "M");
+        q.addData(qrcodeUrl);
+        q.make();
+        qrCanvas.width = 240;
+        qrCanvas.height = 240;
+        qrCanvas.getContext("2d").fillStyle = "#fff";
+        qrCanvas.getContext("2d").fillRect(0, 0, 240, 240);
+        qrCanvas.getContext("2d").fillStyle = "#000";
+        var moduleCount = q.getModuleCount();
+        var cellSize = 240 / (moduleCount + 4);
+        for (var r = 0; r < moduleCount; r++) {
+          for (var c = 0; c < moduleCount; c++) {
+            if (q.isDark(r, c)) {
+              qrCanvas.getContext("2d").fillRect((c + 2) * cellSize, (r + 2) * cellSize, cellSize, cellSize);
+            }
+          }
+        }
+        qrCanvas.style.display = "block";
+        qrUrl.textContent = "或浏览器打开：" + qrcodeUrl;
+        qrUrl.classList.add("show");
+        return;
+      } catch (e) {
+        // fallthrough
+      }
+    }
+
+    // 3) fallback：直接 <img>（多数浏览器对纯文本 URL 会显示「无法加载」）
+    qrImg.alt = qrcodeUrl;
+    qrImg.src = qrcodeUrl;
+    qrImg.style.display = "block";
+    qrUrl.textContent = "二维码链接：" + qrcodeUrl;
+    qrUrl.classList.add("show");
+  }
+
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function startPolling() {
+    stopPolling();
+    pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+  }
+
+  function pollOnce() {
+    if (!sessionKey) return;
+    fetch("/admin/qr/status?session=" + encodeURIComponent(sessionKey), { method: "GET", cache: "no-store" })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          // 401 WXD-AUTH-0002（超时）/ 404 WXD-ADMIN-0001（session 失效）等
+          if (res.body && res.body.error_code === "WXD-AUTH-0002") {
+            setStatus("expired", "二维码已超时，请重新申请");
+            showError(res.body);
+            btnRestart.style.display = "inline-flex";
+            stopPolling();
+          } else if (res.body && res.body.error_code === "WXD-ADMIN-0001") {
+            setStatus("expired", "会话已失效，请重新申请");
+            showError(res.body);
+            btnRestart.style.display = "inline-flex";
+            stopPolling();
+          } else if (res.body && res.body.error_code) {
+            showError(res.body);
+          }
+          return;
+        }
+        var status = res.body.status;
+        if (status === "wait") setStatus("wait", "等待扫码");
+        else if (status === "scanned") setStatus("scanned", "已扫码，请在手机上点击「登录」");
+        else if (status === "confirmed") {
+          setStatus("confirmed", "✅ 扫码成功！可以关闭此页");
+          btnRestart.style.display = "none";
+          note.textContent = "已与微信建立绑定。现在你可以关闭此页或直接「回到首页」开始发链接。";
+          stopPolling();
+        } else if (status === "expired") {
+          setStatus("expired", "二维码已过期，请重新申请");
+          btnRestart.style.display = "inline-flex";
+          stopPolling();
+        } else {
+          setStatus("wait", "未知状态：" + status);
+        }
+      })
+      .catch(function (e) {
+        showError({ error_code: "WXD-NET-0002", message: "轮询失败：" + (e && e.message || e), stage: "前端 pollOnce", request_id: "n/a" });
+      });
+  }
+
+  function startSession() {
+    clearError();
+    btnRestart.style.display = "none";
+    qrPlaceholder.style.display = "block";
+    qrPlaceholder.textContent = "正在申请二维码…";
+    qrCanvas.style.display = "none";
+    qrImg.style.display = "none";
+    qrUrl.classList.remove("show");
+    kvEl.style.display = "none";
+    setStatus("wait", "正在申请二维码…");
+
+    fetch("/admin/qr/start", { method: "POST", cache: "no-store" })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.body || res.body.error_code) {
+          showError(res.body || { error_code: "WXD-ADMIN-0002", message: "申请二维码失败", stage: "/admin/qr/start", request_id: "n/a" });
+          btnRestart.style.display = "inline-flex";
+          setStatus("expired", "申请失败");
+          return;
+        }
+        sessionKey = res.body.sessionKey;
+        kvSession.textContent = sessionKey;
+        kvRequest.textContent = res.body.requestId || "(none)";
+        kvEl.style.display = "grid";
+        renderQr(res.body.qrcodeUrl);
+        setStatus("wait", "请用微信扫描上方二维码");
+        startPolling();
+      })
+      .catch(function (e) {
+        showError({ error_code: "WXD-ADMIN-0002", message: "网络错误：" + (e && e.message || e), stage: "/admin/qr/start", request_id: "n/a" });
+        btnRestart.style.display = "inline-flex";
+        setStatus("expired", "网络错误");
+      });
+  }
+
+  btnRestart.addEventListener("click", function () { startSession(); });
+
+  // 页面打开立即发起
+  startSession();
+})();
+</script>
+</body>
+</html>

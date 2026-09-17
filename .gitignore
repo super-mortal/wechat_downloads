@@ -18,3 +18,9 @@ Thumbs.db
 *.tmp
 *.bak
 *~
+
+# 微信下载器（P4 起）
+data/md/
+public/wechat/download/*.html
+public/wechat/download/*.json
+

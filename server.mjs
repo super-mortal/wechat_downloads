@@ -5,12 +5,27 @@
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { statSync } from "node:fs";
+import { statSync, readFileSync } from "node:fs";
 import { downloadArticle } from "./article.mjs";
 import { openBrowser, dispose } from "./engine.mjs";
 import { makeZip } from "./zip.mjs";
+import { recordPublicBaseUrl } from "./domain.mjs";
+import * as admin from "./admin.mjs";
+import * as storage from "./storage.mjs";
+import { start as startBot, Bot } from "weixin-agent-sdk";
+import { agent } from "./agent.mjs";
 
 const PORT = 3915;
+
+var VIEWS_DIR = path.join(process.cwd(), "views");
+function loadView(name) {
+  return readFileSync(path.join(VIEWS_DIR, name), "utf8");
+}
+
+function domainMiddleware(req, res, next) {
+  try { recordPublicBaseUrl(req); } catch (_) { /* cache miss is non-fatal */ }
+  if (typeof next === "function") next();
+}
 
 function safeName(u) {
   return (u.match(/[A-Za-z0-9_-]{12,}/) || ["archive"])[0].slice(0, 14);
@@ -316,8 +331,76 @@ async function buildZip(okResults) {
   return entries;
 }
 
+
+function htmlEscape(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// 错误响应（WXD-HTTP-0002：单篇 slug HTML 不存在；WXD-HTTP-0003：URL 路径解码失败）
+var HTTP_ERROR_META = {
+  "WXD-HTTP-0002": { http: 404, message: "/wechat/download/<slug>.html 文件不存在" },
+  "WXD-HTTP-0003": { http: 400, message: "URL 路径解码失败" },
+};
+function sendHttpError(res, code, stage) {
+  var meta = HTTP_ERROR_META[code] || { http: 500, message: "internal error" };
+  res.writeHead(meta.http, { "content-type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({
+    error_code: code,
+    message: meta.message,
+    stage: stage,
+    request_id: "n/a",
+  }));
+}
+
+// 读取 public/wechat/download/index.json（mirrorIndexToPublic 产物）
+function readPublicIndex() {
+  var fp = path.join(process.cwd(), "public", "wechat", "download", "index.json");
+  try {
+    var raw = readFileSync(fp, "utf8");
+    var text = String(raw || "").trim();
+    if (!text) return [];
+    var parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    if (e && e.code === "ENOENT") return [];
+    return [];
+  }
+}
+
+// 渲染 /wechat/download 列表页 HTML
+function renderListHtml(entries) {
+  var tpl = loadView("list.html");
+  var body;
+  if (!entries.length) {
+    body = '<div class="empty"><b>暂无收录</b>还没有收录文章，发 <code style="font-family:ui-monospace,Consolas,monospace;">mp.weixin.qq.com/s/...</code> 链接到机器人即可</div>';
+  } else {
+    var rows = [];
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var slug = htmlEscape(e.slug || "");
+      var title = htmlEscape(e.title || "(无标题)");
+      var author = htmlEscape(e.author || "未知作者");
+      var createdAt = htmlEscape(e.created_at || "");
+      rows.push(
+        '<div class="entry">' +
+          '<span class="t"><a href="' + slug + '.html">' + title + '</a></span>' +
+          '<span class="meta">' + author + '<span class="sep">·</span>' + createdAt + '</span>' +
+        '</div>'
+      );
+    }
+    body = '<div class="list">' + rows.join("") + '</div>';
+  }
+  return tpl.replace("<!--__LIST_PLACEHOLDER__-->", body).replace("<!--__COUNT__-->", String(entries.length));
+}
+
 var server = http.createServer(async function(req, res) {
   try {
+    domainMiddleware(req, res);
     var u = new URL(req.url, "http://127.0.0.1:" + PORT);
     if (u.pathname === "/" || u.pathname === "/index.html") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -401,6 +484,114 @@ var server = http.createServer(async function(req, res) {
       res.end(zipBuf);
       return;
     }
+    // /admin/* 管理面板 + 二维码（task4 / P3）
+    if (u.pathname === "/admin" || u.pathname === "/admin/") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(loadView("admin.html"));
+      return;
+    }
+    if (u.pathname === "/admin/qr") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(loadView("admin-qr.html"));
+      return;
+    }
+    if (u.pathname === "/admin/qr/start" && req.method === "POST") {
+      try {
+        var result = await admin.startQrSession();
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({
+          qrcodeUrl: result.qrcodeUrl,
+          sessionKey: result.sessionKey,
+          requestId: result.requestId,
+        }));
+      } catch (err) {
+        var code = (err && err.error_code) || "WXD-ADMIN-0002";
+        var http = (err && err.http) || 500;
+        res.writeHead(http, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(err && err.toJSON ? err.toJSON() : {
+          error_code: code,
+          message: (err && err.message) || String(err),
+          stage: "admin.mjs#startQrSession",
+          request_id: "n/a",
+        }));
+      }
+      return;
+    }
+    if (u.pathname === "/admin/qr/status") {
+      var sessionKey = u.searchParams.get("session") || "";
+      try {
+        var status = await admin.pollQrStatus(sessionKey);
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ status: status }));
+      } catch (err) {
+        var code2 = (err && err.error_code) || "WXD-ADMIN-0001";
+        var http2 = (err && err.http) || 500;
+        res.writeHead(http2, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(err && err.toJSON ? err.toJSON() : {
+          error_code: code2,
+          message: (err && err.message) || String(err),
+          stage: "admin.mjs#pollQrStatus",
+          request_id: "n/a",
+        }));
+      }
+      return;
+    }
+    // /wechat/download 系列路由（P6 / task7）
+    //   * /wechat/download/index.json 必须在 <slug>.html 之前注册，否则会被当成 slug="index.json"
+    if (u.pathname === "/wechat/download/index.json") {
+      try {
+        var publicIdx = readPublicIndex();
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(publicIdx));
+      } catch (e) {
+        res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error_code: "WXD-STORAGE-0001", message: e && e.message || String(e), stage: "server.mjs#/wechat/download/index.json" }));
+      }
+      return;
+    }
+    if (u.pathname.indexOf("/wechat/download/") === 0 && u.pathname.slice("/wechat/download/".length).length > 0) {
+      var rest = u.pathname.slice("/wechat/download/".length);
+      if (rest !== "index.json" && /\.html$/.test(rest) && !rest.includes("/")) {
+        // 浏览器 / Invoke-WebRequest 客户端会把 slug 中的非 ASCII 字符按百分号编码发送；
+        // new URL().pathname 不会自动 decode，因此必须显式 decodeURIComponent，否则中文 slug 会找不到文件。
+        var slug;
+        try {
+          slug = decodeURIComponent(rest.slice(0, -5)); // 去掉 ".html" 再解码
+        } catch (decodeErr) {
+          sendHttpError(res, "WXD-HTTP-0003", "server.mjs#/wechat/download/<slug>.html");
+          return;
+        }
+        var filePath = path.join(process.cwd(), "public", "wechat", "download", slug + ".html");
+        try {
+          var buf = readFileSync(filePath);
+          res.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "content-length": buf.length,
+          });
+          res.end(buf);
+        } catch (e) {
+          if (e && e.code === "ENOENT") {
+            sendHttpError(res, "WXD-HTTP-0002", "server.mjs#/wechat/download/<slug>.html");
+          } else {
+            res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+            res.end("read error: " + (e && e.message));
+          }
+        }
+        return;
+      }
+    }
+    if (u.pathname === "/wechat/download" || u.pathname === "/wechat/download/") {
+      try {
+        // storage.readIndex 是 async；这里用同步读取 public mirror 更轻量
+        var entries = readPublicIndex();
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(renderListHtml(entries));
+      } catch (e) {
+        res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+        res.end("list error: " + (e && e.message));
+      }
+      return;
+    }
     if (u.pathname.indexOf("/dl/") === 0) {
       var pid = u.pathname.slice(4);
       var entry = pendingFiles.get(pid);
@@ -423,3 +614,29 @@ var server = http.createServer(async function(req, res) {
 server.listen(PORT, "127.0.0.1", function(){
   console.log("ready · http://127.0.0.1:" + PORT);
 });
+
+// 可选：WECHAT_BOT=1 时把 agent 接入 weixin-agent-sdk 长轮询（DEV_PLAN.md §10.3 / §A.2）
+if (process.env.WECHAT_BOT === "1") {
+  (async () => {
+    const log = (msg) => console.log("[wechat-bot]", msg);
+    try {
+      // SDK 真实签名（weixin-agent-sdk@0.5.0 dist/index.d.mts）：
+      //   start(agent: Agent, opts?: StartOptions): Bot
+      //   StartOptions = { accountId?, abortSignal?, log?: (msg: string) => void }
+      // start() 内部启动 monitor 后立即返回 Bot 实例；bot.wait() 才阻塞至 monitor 退出。
+      // 本场景 HTTP 已保活进程，故不 await bot.wait()。
+      const bot = await startBot(agent, { log });
+      console.log("[wechat-bot] bot started", { type: typeof bot, isBot: bot instanceof Bot });
+    } catch (err) {
+      // 启动失败（未登录 / 二维码未扫 / 长轮询断开）：按 dev-spec.md WXD-NET-0002 登记
+      console.error("[wechat-bot] start failed", {
+        error_code: "WXD-NET-0002",
+        message: (err && err.message) || String(err),
+        stage: "server.mjs#WECHAT_BOT=1",
+      });
+      // 不退出进程；HTTP 仍可用
+    }
+  })().catch(err => console.error("[wechat-bot] uncaught", err));
+}
+
+
