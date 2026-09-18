@@ -510,8 +510,15 @@ function renderAdminDashboard(req, session) {
   var hasEnv = false;
   try { hasEnv = !!(auth.hasEnvOverride && auth.hasEnvOverride()); } catch (_) {}
 
-  // 微信绑定状态：默认未绑定
+  // 微信绑定状态：调 admin.isLoggedIn() 检查 SDK 本地存储
   var wechatStatus = '<span class="muted">未绑定</span> <a class="blog-link" href="/admin/qr">前往扫码 →</a>';
+  try {
+    var st = (admin.isLoggedIn && typeof admin.isLoggedIn === "function") ? admin.isLoggedIn() : null;
+    if (st && (st.loggedIn || st.isLoggedIn || st.user || st.nickname || st.uin)) {
+      var nick = st.nickname || st.user || st.uin || '';
+      wechatStatus = '<span class="ok">已绑定 <b>' + adminHtmlEscape(nick) + '</b></span> <a class="blog-link" href="/admin/qr">刷新 →</a>';
+    }
+  } catch (_) {}
 
   // 归档：通过已有 readPublicIndex() 读取 public mirror
   var latest = "暂无", total = 0;
