@@ -10,6 +10,7 @@
 //   dispose(browser)
 
 import realEngine from "playwright";
+import fsSync from "node:fs";
 
 const FASTER_LAUNCH_ARGS = [
   "--no-sandbox",
@@ -24,7 +25,7 @@ function precheckChromium() {
   try {
     const exe = realEngine.chromium.executablePath();
     if (!exe) return;
-    require("node:fs").accessSync(exe);
+    fsSync.accessSync(exe);
   } catch (_) {
     const hint = "Chromium 不可执行：路径未找到。\n\n修复：执行 `npx playwright install chromium` 或重新跑 `npm install`（会自动触发 postinstall）。";
     const e = new Error(hint);
@@ -58,12 +59,27 @@ export async function openPage(browser, locale) {
 }
 
 export async function navigateAndWait(page, url, waitSelector, extraMs) {
-  // 同时挂个超时保护，避免某次请求异常卡死
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+  // 性能优化：微信文章正文为服务端直出，不依赖页面 JS/CSS；
+  // 而 <head> 同步脚本在海外链路上会阻塞 HTML 解析器（实测 6.5s），
+  // 拦截 script/stylesheet 置空后解析不再阻塞（实测 goto+正文 ~4s）。
+  // 图片真实地址取自 data-src 属性（正则直取），不受脚本拦截影响。
+  await page.route("**/*", (route) => {
+    const t = route.request().resourceType();
+    if (t === "script" || t === "stylesheet") {
+      return route.fulfill({
+        status: 200,
+        contentType: t === "script" ? "application/javascript" : "text/css",
+        body: ""
+      });
+    }
+    return route.continue();
+  });
+  await page.goto(url, { waitUntil: "commit", timeout: 25000 });
   if (waitSelector) {
-    try { await page.waitForSelector(waitSelector, { timeout: 20000 }); } catch (e) {}
+    try { await page.waitForSelector(waitSelector, { timeout: 15000 }); } catch (e) {}
   }
-  await page.waitForTimeout(extraMs || 1500);
+  // 收尾等待压缩：图片真实地址取自 data-src（不依赖页面 JS），无需久等
+  await page.waitForTimeout(Math.min(extraMs || 500, 800));
 }
 
 export async function readArticleDOM(page) {
