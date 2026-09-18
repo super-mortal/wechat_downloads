@@ -24,3 +24,6 @@ data/md/
 public/wechat/download/*.html
 public/wechat/download/*.json
 
+
+# domain 缓存（运行期生成，含部署域名；不入仓）
+.domain-cache.json

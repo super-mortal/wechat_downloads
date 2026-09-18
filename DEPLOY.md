@@ -357,6 +357,31 @@ proxy_set_header X-Forwarded-Host  $host;     # ← 必须
 
 ---
 
+
+---
+
+## 十三、修订记录
+
+### v2 · 2026-09-18 · domain 缓存文件持久化
+
+**改动**：domain.mjs 把公网域名同步落盘到项目根目录 .domain-cache.json（100ms 防抖），进程重启后第一次 bot 回执会自动从该文件恢复，不再退回到 http://127.0.0.1:3915。
+
+**为什么**：原先域名只存在内存里，进程一重启就清空；如果重启后 bot 立即收到链接（中间没人访问过 HTTP），就只能走兜底值。
+
+**现在的优先级（从高到低）**：
+
+1. PUBLIC_BASE_URL env（仍是最高优）
+2. Nginx X-Forwarded-Host + X-Forwarded-Proto（HTTP 请求时自动记录到内存）
+3. 直接访问 Node 服务的 Host 头（HTTP 请求时自动记录到内存）
+4. **.domain-cache.json 文件持久化缓存（新增）**
+5. 兜底 http://127.0.0.1:3915
+
+**部署侧无需任何改动**：.domain-cache.json 已被 .gitignore 忽略，不会污染仓库；你已经在服务器上设的 PUBLIC_BASE_URL=http://128.241.231.124:3916 也不受影响（env 永远优先）。
+
+> **验证方式**：服务器上 pm2 restart wechat-downloads --update-env && pm2 save 后，让微信立刻重发一条链接，回执应该是 http://128.241.231.124:3916/wechat/download/...，而不是 127.0.0.1:3915。
+
+---
+
 ## 附录 A：环境变量速查
 
 | 变量 | 默认 | 说明 |
@@ -369,3 +394,5 @@ proxy_set_header X-Forwarded-Host  $host;     # ← 必须
 
 > 文档同步自 `DEV_PLAN.md` §5.3 / §7.x / §9.x / §10.3。
 > 修订：v1 · 2026-09-17
+
+
