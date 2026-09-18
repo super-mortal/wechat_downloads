@@ -105,6 +105,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:14px;background:var(-
   <div class="brand"><span class="mark">免</span>微信公众号在线下载器</div>
   <div class="hd-links">
     <a class="blog-link" href="https://github.com/super-mortal/wechat_downloads" target="_blank" rel="noopener">GitHub</a>
+    <a class="blog-link" href="/admin">管理后台 →</a>
   </div>
 </div></header>
 <main class="wrap">
@@ -579,7 +580,17 @@ var server = http.createServer(async function(req, res) {
 
   try {
     domainMiddleware(req, res);
-    var u = new URL(req.url, "http://127.0.0.1:" + PORT);
+    var __uGuard = new URL(req.url, "http://127.0.0.1:" + PORT);
+    // init guard: 部署后首次访问（auth 未初始化）— 任何 path 都 302 到 /admin/setup
+    // 例外：/admin/setup 本身 + 静态资源 + favicon + healthz
+    var __pGuard = __uGuard.pathname;
+    var __isStatic = (__pGuard === "/favicon.ico") || (__pGuard.indexOf("/assets/") === 0) || (__pGuard.indexOf("/public/") === 0);
+    if (!auth.isInitialized() && __pGuard !== "/admin/setup" && __pGuard !== "/api/admin/setup" && !__isStatic) {
+      res.writeHead(302, { location: "/admin/setup" + (__uGuard.search || "") });
+      res.end();
+      return;
+    }
+    var u = __uGuard;
     if (u.pathname === "/" || u.pathname === "/index.html") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(renderHome());
