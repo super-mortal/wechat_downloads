@@ -6,6 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { login, isLoggedIn } from "weixin-agent-sdk";
+
+// re-export: dashboard 绑定状态卡片需要 (server.mjs renderAdminDashboard)
+export { isLoggedIn };
 import { randomUUID } from "node:crypto";
 
 const STAGE = {

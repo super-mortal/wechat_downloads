@@ -123,9 +123,9 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:14px;background:var(-
       </div></div>
     <div><div class="fieldlabel" style="margin-bottom:8px;">输出格式 · 可多选</div>
       <div class="chips">
-        <label class="chip"><input type="checkbox" name="fmt" value="html" checked>HTML</label>
-        <label class="chip"><input type="checkbox" name="fmt" value="md" checked>Markdown</label>
-        <label class="chip"><input type="checkbox" name="fmt" value="pdf" checked>PDF</label>
+        <label class="chip"><input type="checkbox" name="fmt" value="html">HTML</label>
+        <label class="chip"><input type="checkbox" name="fmt" value="md">Markdown</label>
+        <label class="chip"><input type="checkbox" name="fmt" value="pdf">PDF</label>
       </div></div>
   </div>
   <div class="actions">
@@ -186,7 +186,7 @@ btn.addEventListener("click", async function() {
   var urls = (document.getElementById("urls").value || "").split(/\\u005Cr\\u005Cn|\\u000d\\u000a|\\r|\\n/).map(function(s){return s.trim();}).filter(Boolean);
   var fmts = Array.from(document.querySelectorAll(".chip input:checked")).map(function(x){return x.value;});
   if (!urls.length) { showStatus("请先粘一条链接进来。", "err"); return; }
-  if (!fmts.length) { showStatus("至少勾选一种格式。", "err"); return; }
+  if (!fmts.length) { alert("必须选择一个输出格式"); return; }
   btn.disabled = true; btn.querySelector(".label").textContent = split ? "打包中…" : "下载中…";
   clearStatus();
   try {
