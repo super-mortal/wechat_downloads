@@ -9,7 +9,7 @@ import { statSync, readFileSync, existsSync, readdirSync as fsReaddirSync, mkdir
 import { downloadArticle } from "./article.mjs";
 import { openBrowser, dispose } from "./engine.mjs";
 import { makeZip } from "./zip.mjs";
-import { recordPublicBaseUrl } from "./domain.mjs";
+import { recordPublicBaseUrl, getCachedPublicBaseUrl } from "./domain.mjs";
 import * as admin from "./admin.mjs";
 import * as storage from "./storage.mjs";
 import * as auth from "./auth.mjs";
