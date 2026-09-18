@@ -178,9 +178,9 @@ function htmlToMarkdown(html, urlMap) {
 // formats: array of "html", "md", "pdf"
 // split: boolean。true=分文件模式（image 到 imgs/、HTML/MD 相对引用、产物 zip 打包）；
 //              false=合并模式（image 内嵌 data URI、产物立刻 ready）。
-export async function downloadArticle({ url, formats, split, browser }) {
+export async function downloadArticle({ url, formats, split, browser, outDir, outPrefix }) {
   formats = formats || ["html"];
-  outDir = outDir || ".";
+  outDir = outDir || "out";
   outPrefix = outPrefix || "article";
   const ownBrowser = !browser;
   const br = browser || await openBrowser();
@@ -208,13 +208,15 @@ export async function downloadArticle({ url, formats, split, browser }) {
       const fname = split ? outPrefix + ".html" : outPrefix + "-single.html";
       const p = path.join(outDir, fname);
       await fsLib.writeFile(p, fullHtml, "utf8");
-      outputs.push({ format: "html", filename: fname, path: p });
+      outputs.push({ format: "html", filename: fname, path: p, content: Buffer.from(fullHtml, "utf8") });
     }
 
     // 把 imgs/ 目录也作为一个整体挂到返回值里
     if (split) {
       const imgsList = await fsLib.readdir(imgsDir);
-      outputs.push({ format: "_imgs", dir: imgsDir, files: imgsList.map(f => path.join(imgsDir, f)) });
+      const imgsItems = [];
+      for (const f of imgsList) { imgsItems.push({ name: f, content: await fsLib.readFile(path.join(imgsDir, f)) }); }
+      outputs.push({ format: "_imgs", dir: imgsDir, files: imgsList.map(f => path.join(imgsDir, f)), items: imgsItems });
     }
 
     // Markdown
@@ -237,7 +239,7 @@ export async function downloadArticle({ url, formats, split, browser }) {
       ].filter(Boolean).join("\n");
       const p = path.join(outDir, outPrefix + ".md");
       await fsLib.writeFile(p, mdBody, "utf8");
-      outputs.push({ format: "md", filename: outPrefix + ".md", path: p });
+      outputs.push({ format: "md", filename: outPrefix + ".md", path: p, content: Buffer.from(mdBody, "utf8") });
     }
 
     // PDF：对"我们自己生成的 HTML"做 page.pdf，比直接拉 mp.weixin.qq.com 的全页面快很多
@@ -247,7 +249,7 @@ export async function downloadArticle({ url, formats, split, browser }) {
       const pdfBuf = await pdfFromHtmlBuffer(br, fullHtml, {});
       const p = path.join(outDir, outPrefix + ".pdf");
       await fsLib.writeFile(p, pdfBuf);
-      outputs.push({ format: "pdf", filename: outPrefix + ".pdf", path: p });
+      outputs.push({ format: "pdf", filename: outPrefix + ".pdf", path: p, content: pdfBuf });
     }
 
     return {
@@ -262,3 +264,4 @@ export async function downloadArticle({ url, formats, split, browser }) {
     if (ownBrowser) await dispose(br);
   }
 }
+
