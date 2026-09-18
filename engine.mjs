@@ -101,7 +101,11 @@ export async function pdfFromHtmlBuffer(browser, html, opts) {
   try {
     const page = await ctx.newPage();
     await page.setContent(html, { waitUntil: "load", timeout: 30000 });
-    await page.waitForTimeout(300);
+    // 等字体就绪（避免 Noto Serif SC 等网络字体还没下载完就出 PDF，导致中文渲染为 tofu）
+    try {
+      await page.evaluate(() => (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()));
+    } catch (_) {}
+    await page.waitForTimeout(500);
     return await page.pdf({
       format: opts.format || "A4",
       printBackground: opts.printBackground !== false,
