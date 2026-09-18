@@ -5,13 +5,14 @@
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { statSync, readFileSync } from "node:fs";
+import { statSync, readFileSync, existsSync, readdirSync as fsReaddirSync, mkdirSync, writeFileSync, renameSync, chmodSync } from "node:fs";
 import { downloadArticle } from "./article.mjs";
 import { openBrowser, dispose } from "./engine.mjs";
 import { makeZip } from "./zip.mjs";
 import { recordPublicBaseUrl } from "./domain.mjs";
 import * as admin from "./admin.mjs";
 import * as storage from "./storage.mjs";
+import * as auth from "./auth.mjs";
 import { start as startBot, Bot } from "weixin-agent-sdk";
 import { agent } from "./agent.mjs";
 
@@ -35,7 +36,7 @@ function renderHome() {
   return `<!doctype html><html lang="zh-CN"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>免费公众号下载器</title>
+<title>微信公众号在线下载器</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 fill=%27%23FDFBF7%27 stroke=%27%231A1A1A%27 stroke-width=%274%27/><text x=%2732%27 y=%2746%27 text-anchor=%27middle%27 font-family=%27serif%27 font-weight=%27900%27 font-size=%2740%27 fill=%27%231A1A1A%27>免</text></svg>">
 <style>
 :root{--paper:#FDFBF7;--paper-deep:#F5F5F5;--ink:#1A1A1A;--pencil:#4A4A4A;--soft:#9a9a9a;--border:#E0E0E0;--hl:#FFFF00;
@@ -101,16 +102,15 @@ textarea:focus{border-color:var(--ink);box-shadow:0 0 0 2px var(--hl);}
 code{font-family:ui-monospace,Consolas,monospace;font-size:14px;background:var(--paper-deep);padding:2px 6px;border-radius:3px;color:var(--ink);}
 </style></head><body>
 <header><div class="wrap hd-row">
-  <div class="brand"><span class="mark">免</span>免费公众号下载器</div>
+  <div class="brand"><span class="mark">免</span>微信公众号在线下载器</div>
   <div class="hd-links">
     <a class="blog-link" href="https://github.com/super-mortal/wechat_downloads" target="_blank" rel="noopener">GitHub</a>
-    <a class="blog-link" href="https://supermortal.cn" target="_blank" rel="noopener">博客 → supermortal.cn</a>
   </div>
 </div></header>
 <main class="wrap">
-  <span class="eyebrow">免登录 · 免 Cookie · 本地浏览器直读</span>
-  <h1>把微信公众号里看到的好文章，<br><mark>一键留到本机</mark>。</h1>
-  <p class="lead">贴链接、勾格式，点下载。HTML / Markdown / PDF 可单选也可以同时要；图片默认以内嵌方式进 HTML，勾上"分文件"则把图片和文章一起打成 zip。无需账号、不会有广告。</p>
+  <span class="eyebrow">免登录 · 免 Cookie · 在线解析下载</span>
+  <h1>微信公众号在线下载器</h1>
+  <p class="lead">粘贴公众号文章链接 → 在线解析 → 下载为 HTML / Markdown / PDF（ZIP 打包）。</p>
   <div class="formgrid">
     <div><div class="fieldlabel" style="margin-bottom:8px;">文章链接</div>
       <textarea id="urls" placeholder="https://...（一行一条，批量可以一次粘贴多行）"></textarea></div>
@@ -136,14 +136,14 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:14px;background:var(-
   <div class="wrap footer-grid">
     <div>
       <h4>项目</h4>
-      <p class="title">免费公众号下载器</p>
-      <p class="small">一个用本机浏览器直接读公众号文章、导出 HTML / Markdown / PDF 的小工具。<br>零账号、零订阅、零云端记录。</p>
+      <p class="title">微信公众号在线下载器</p>
+      <p class="small">一个在线复制公众号文章链接、解析、下载为 HTML / Markdown / PDF 的小工具。<br>零账号、零订阅、零云端记录。</p>
     </div>
     <div>
       <h4>作者与支持</h4>
       <p><a href="https://supermortal.cn" target="_blank" rel="noopener">博客：supermortal.cn</a></p>
       <p><a href="https://ifdian.net/a/supermortal" target="_blank" rel="noopener">爱发电：supermortal</a></p>
-      <p class="small"><a href="https://qm.qq.com/q/vZUveTbAuk" target="_blank" rel="noopener">功能改进 / bug 反馈 欢迎留言</a></p>
+      <p class="small"><a href="https://github.com/super-mortal/wechat_downloads/issues" target="_blank" rel="noopener">功能改进 / bug 反馈 欢迎留言</a></p>
     </div>
   </div>
 </footer>
@@ -398,7 +398,185 @@ function renderListHtml(entries) {
   return tpl.replace("<!--__LIST_PLACEHOLDER__-->", body).replace("<!--__COUNT__-->", String(entries.length));
 }
 
+// ============================================================
+// 鉴权辅助函数（task11：server.mjs 鉴权路由集成）
+// ============================================================
+
+// parseCookies: 解析 Cookie 头到对象
+function parseCookies(req) {
+  var out = {};
+  var h = req.headers && req.headers.cookie;
+  if (!h) return out;
+  for (var i = 0; i < h.split(";").length; i++) {
+    var part = h.split(";")[i];
+    var idx = part.indexOf("=");
+    if (idx === -1) continue;
+    var k = part.slice(0, idx).trim();
+    var v = part.slice(idx + 1).trim();
+    if (k) {
+      try { out[k] = decodeURIComponent(v); } catch (_) { out[k] = v; }
+    }
+  }
+  return out;
+}
+
+// adminHtmlEscape: HTML 转义防 XSS
+function adminHtmlEscape(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// injectErrBlock: 在 setup.html / login.html 的 errBlock placeholder 位置注入错误
+function injectErrBlock(html, opts) {
+  if (!opts || !opts.errCode) return html;
+  var errBlock = '<pre class="err show">[' + adminHtmlEscape(opts.errCode) + '] ' +
+    adminHtmlEscape(opts.errMsg || "") + '\n' +
+    'stage: ' + adminHtmlEscape(opts.stage || "") + '\n' +
+    'request_id: ' + adminHtmlEscape(opts.requestId || "") + '</pre>';
+  // try placeholder first
+  var ph = '<!-- errBlock placeholder: server.mjs 在错误时会把 <pre class="err">[WXD-AUTH-XXXX] ...</pre> 插到 main 顶部 -->';
+  if (html.indexOf(ph) !== -1) return html.replace(ph, errBlock);
+  // fallback: inject before </form>
+  if (html.indexOf("</form>") !== -1) return html.replace("</form>", errBlock + "</form>");
+  // last resort: before </body>
+  return html.replace("</body>", errBlock + "</body>");
+}
+
+// renderSetupHtml: 渲染首次设置管理员密码页面
+function renderSetupHtml(opts) {
+  opts = opts || {};
+  var html;
+  try {
+    html = readFileSync(path.join(VIEWS_DIR, "setup.html"), "utf8");
+  } catch (_) {
+    html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>设置管理员密码</title>' +
+      '<style>body{font-family:serif;background:#FDFBF7;color:#1A1A1A;padding:40px 24px;font-size:17px;line-height:1.8;}' +
+      '.wrap{max-width:420px;margin:0 auto;}h1{font-size:24px;margin:0 0 8px;}label{display:block;margin:12px 0 4px;font-size:13px;color:#4A4A4A;}' +
+      'input{width:100%;padding:8px 10px;border:1px solid #1A1A1A;border-radius:3px;font:16px ui-monospace,Consolas,monospace;background:#FDFBF7;color:#1A1A1A;box-sizing:border-box;}' +
+      'button{margin-top:18px;padding:8px 16px;border:1px solid #1A1A1A;background:#1A1A1A;color:#FDFBF7;border-radius:3px;cursor:pointer;font-family:serif;}</style></head>' +
+      '<body><div class="wrap">' +
+      '<h1>设置管理员密码</h1>' +
+      '<p>首次使用需要设置管理员用户名与密码（≥ 8 位）。</p>' +
+      '<form method="post" action="/admin/setup">' +
+      '<label>用户名<input name="username" required></label>' +
+      '<label>密码（≥ 8 位）<input type="password" name="password" minlength="8" required></label>' +
+      '<label>确认密码<input type="password" name="password2" minlength="8" required></label>' +
+      '<button type="submit">设置并登录</button>' +
+      '</form>' +
+      '</div></body></html>';
+  }
+  return injectErrBlock(html, opts);
+}
+
+// renderLoginHtml: 渲染登录页面
+function renderLoginHtml(opts) {
+  opts = opts || {};
+  var html;
+  try {
+    html = readFileSync(path.join(VIEWS_DIR, "login.html"), "utf8");
+  } catch (_) {
+    html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>登录</title>' +
+      '<style>body{font-family:serif;background:#FDFBF7;color:#1A1A1A;padding:40px 24px;font-size:17px;line-height:1.8;}' +
+      '.wrap{max-width:380px;margin:0 auto;}h1{font-size:24px;margin:0 0 8px;}label{display:block;margin:12px 0 4px;font-size:13px;color:#4A4A4A;}' +
+      'input{width:100%;padding:8px 10px;border:1px solid #1A1A1A;border-radius:3px;font:16px ui-monospace,Consolas,monospace;background:#FDFBF7;color:#1A1A1A;box-sizing:border-box;}' +
+      'button{margin-top:18px;padding:8px 16px;border:1px solid #1A1A1A;background:#1A1A1A;color:#FDFBF7;border-radius:3px;cursor:pointer;font-family:serif;}</style></head>' +
+      '<body><div class="wrap">' +
+      '<h1>管理员登录</h1>' +
+      '<form method="post" action="/admin/login">' +
+      '<label>用户名<input name="username" required></label>' +
+      '<label>密码<input type="password" name="password" required></label>' +
+      '<button type="submit">登录</button>' +
+      '</form>' +
+      '</div></body></html>';
+  }
+  return injectErrBlock(html, opts);
+}
+
+// renderAdminDashboard: 渲染控制台首页（task4 改造后的 admin.html + 数据注入）
+function renderAdminDashboard(req, session) {
+  var html;
+  try {
+    html = readFileSync(path.join(VIEWS_DIR, "admin.html"), "utf8");
+  } catch (e) {
+    return null;
+  }
+  var user = (session && session.user) || "—";
+  var loginAt = new Date((session && session.createdAt) || Date.now()).toLocaleString("zh-CN");
+  var hasEnv = false;
+  try { hasEnv = !!(auth.hasEnvOverride && auth.hasEnvOverride()); } catch (_) {}
+
+  // 微信绑定状态：默认未绑定
+  var wechatStatus = '<span class="muted">未绑定</span> <a class="blog-link" href="/admin/qr">前往扫码 →</a>';
+
+  // 归档：通过已有 readPublicIndex() 读取 public mirror
+  var latest = "暂无", total = 0;
+  try {
+    var list = readPublicIndex();
+    if (list && list.length) {
+      total = list.length;
+      latest = list[0].title || "未命名";
+    }
+  } catch (_) {}
+
+  // 域名
+  var domain = "未配置", publicBaseUrl = "未配置";
+  try {
+    if (typeof getCachedPublicBaseUrl === "function") {
+      publicBaseUrl = getCachedPublicBaseUrl() || "未配置";
+    }
+  } catch (_) {}
+  domain = publicBaseUrl;
+  if (!domain || domain === "未配置") {
+    try { domain = req.headers.host || "未配置"; } catch (_) {}
+  }
+
+  // uptime
+  var upt = process.uptime();
+  var upStr = Math.floor(upt / 86400) + "d " + Math.floor((upt % 86400) / 3600) + "h";
+
+  // data size
+  var dataSize = "—";
+  try {
+    var dataDir = path.join(process.cwd(), "data");
+    var totalBytes = 0;
+    function walk(p) {
+      var st = statSync(p);
+      if (st.isDirectory()) {
+        var names = fsReaddirSync(p);
+        for (var i = 0; i < names.length; i++) walk(path.join(p, names[i]));
+      } else {
+        totalBytes += st.size;
+      }
+    }
+    if (existsSync(dataDir)) { walk(dataDir); dataSize = (totalBytes / 1024 / 1024).toFixed(2) + " MB"; }
+  } catch (_) {}
+
+  var repl = {
+    "{{username}}": adminHtmlEscape(user),
+    "{{loginAt}}": adminHtmlEscape(loginAt),
+    "{{hasEnvOverride}}": hasEnv ? '<span class="badge badge-warn">ENV 覆盖</span>' : "",
+    "{{wechatStatus}}": wechatStatus,
+    "{{latestArticle}}": adminHtmlEscape(latest),
+    "{{totalArticles}}": String(total),
+    "{{currentDomain}}": adminHtmlEscape(domain),
+    "{{publicBaseUrl}}": adminHtmlEscape(publicBaseUrl),
+    "{{uptime}}": adminHtmlEscape(upStr),
+    "{{dataSize}}": adminHtmlEscape(dataSize),
+  };
+  for (var k in repl) {
+    if (Object.prototype.hasOwnProperty.call(repl, k)) {
+      html = html.split(k).join(repl[k]);
+    }
+  }
+  return html;
+}
+
 var server = http.createServer(async function(req, res) {
+
   try {
     domainMiddleware(req, res);
     var u = new URL(req.url, "http://127.0.0.1:" + PORT);
@@ -484,18 +662,204 @@ var server = http.createServer(async function(req, res) {
       res.end(zipBuf);
       return;
     }
-    // /admin/* 管理面板 + 二维码（task4 / P3）
+    // /admin/* 鉴权路由 + 管理面板（task11 / P-rescue）
+    // 解析 cookie 注入 req.cookies / req.session（每个请求）
+    var __adminCookies = parseCookies(req);
+    req.cookies = __adminCookies;
+    req.session = __adminCookies.wxd_sid ? auth.getSession(__adminCookies.wxd_sid) : null;
+
+    // --- /admin/setup：首次初始化表单 + 处理 ---
+    if (u.pathname === "/admin/setup") {
+      if (req.method === "GET") {
+        if (auth.isInitialized()) { res.writeHead(302, { location: "/admin/login" }); res.end(); return; }
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(renderSetupHtml());
+        return;
+      }
+      // POST
+      if (auth.isInitialized()) {
+        // 已初始化：忽略 setup POST，重定向到 login
+        res.writeHead(302, { location: "/admin/login" }); res.end(); return;
+      }
+      var __setupBody = "";
+      req.on("data", function (c) { __setupBody += c; });
+      req.on("end", function () {
+        var __params = new URLSearchParams(__setupBody);
+        var __username = __params.get("username") || "";
+        var __p1 = __params.get("password") || "";
+        var __p2 = __params.get("password2") || "";
+        var __requestId = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+        if (__p1.length < 8) {
+          res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+          res.end(renderSetupHtml({ errCode: "WXD-AUTH-0008", errMsg: "密码强度不足（长度 < 8）", stage: "server.mjs#/admin/setup POST", requestId: __requestId }));
+          return;
+        }
+        if (__p1 !== __p2) {
+          res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+          res.end(renderSetupHtml({ errCode: "WXD-AUTH-0009", errMsg: "两次密码不一致", stage: "server.mjs#/admin/setup POST", requestId: __requestId }));
+          return;
+        }
+        try {
+          var __hash = auth.hashPassword(__p1);
+          var __authDir = path.join(process.cwd(), "data");
+          if (!existsSync(__authDir)) mkdirSync(__authDir, { recursive: true, mode: 0o700 });
+          var __authPath = path.join(__authDir, "auth.json");
+          var __authRecord = { username: __username, scryptHash: __hash.hash, salt: __hash.salt, params: __hash.params, createdAt: Date.now(), updatedAt: Date.now() };
+          var __tmp = __authPath + ".tmp-" + Math.random().toString(36).slice(2, 8);
+          writeFileSync(__tmp, JSON.stringify(__authRecord), { mode: 0o600 });
+          try { chmodSync(__tmp, 0o600); } catch (_) {}
+          renameSync(__tmp, __authPath);
+          try { chmodSync(__authPath, 0o600); } catch (_) {}
+          // 重新读回内存
+          var __reload = auth.reloadAfterSetup();
+          if (!__reload || !__reload.ok) {
+            res.writeHead(500, { "content-type": "text/html; charset=utf-8" });
+            res.end(renderSetupHtml({ errCode: (__reload && __reload.error_code) || "WXD-AUTH-0006", errMsg: (__reload && __reload.message) || "reload auth failed", stage: "server.mjs#/admin/setup POST reload", requestId: __requestId }));
+            return;
+          }
+          var __sidObj = auth.createSession(__username);
+          var __sid = __sidObj && __sidObj.sid;
+          if (!__sid) {
+            res.writeHead(500, { "content-type": "text/html; charset=utf-8" });
+            res.end(renderSetupHtml({ errCode: "WXD-AUTH-0006", errMsg: "createSession failed", stage: "server.mjs#/admin/setup POST", requestId: __requestId }));
+            return;
+          }
+          try { auth.appendAudit({ ip: req.socket.remoteAddress || "?", user: __username, action: "setup", ok: true }); } catch (_) {}
+          res.writeHead(302, { location: "/admin", "set-cookie": "wxd_sid=" + __sid + "; HttpOnly; SameSite=Lax; Path=/; Max-Age=" + (7 * 24 * 3600) });
+          res.end();
+          return;
+        } catch (e) {
+          res.writeHead(500, { "content-type": "text/html; charset=utf-8" });
+          res.end(renderSetupHtml({ errCode: "WXD-AUTH-0006", errMsg: (e && e.message) || "setup failed", stage: "server.mjs#/admin/setup POST", requestId: __requestId }));
+          return;
+        }
+      });
+      return;
+    }
+
+    // --- /admin/login：登录表单 + 处理 ---
+    if (u.pathname === "/admin/login") {
+      if (req.method === "GET") {
+        if (!auth.isInitialized()) { res.writeHead(302, { location: "/admin/setup" }); res.end(); return; }
+        if (req.session) { res.writeHead(302, { location: "/admin" }); res.end(); return; }
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(renderLoginHtml());
+        return;
+      }
+      // POST
+      var __loginBody = "";
+      req.on("data", function (c) { __loginBody += c; });
+      req.on("end", function () {
+        if (!auth.isInitialized()) { res.writeHead(302, { location: "/admin/setup" }); res.end(); return; }
+        var __lp = new URLSearchParams(__loginBody);
+        var __luser = __lp.get("username") || "";
+        var __lpwd = __lp.get("password") || "";
+        var __lreqid = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+        var __ok = false;
+        try { __ok = auth.verifyPassword(__luser, __lpwd); } catch (_) { __ok = false; }
+        if (!__ok) {
+          try { auth.appendAudit({ ip: req.socket.remoteAddress || "?", user: __luser, action: "login", ok: false, error_code: "WXD-AUTH-0003" }); } catch (_) {}
+          res.writeHead(401, { "content-type": "text/html; charset=utf-8" });
+          res.end(renderLoginHtml({ errCode: "WXD-AUTH-0003", errMsg: "用户名或密码错误", stage: "server.mjs#/admin/login POST", requestId: __lreqid }));
+          return;
+        }
+        var __sessObj = auth.createSession(__luser);
+        var __sessId = __sessObj && __sessObj.sid;
+        if (!__sessId) {
+          res.writeHead(500, { "content-type": "text/html; charset=utf-8" });
+          res.end(renderLoginHtml({ errCode: "WXD-AUTH-0006", errMsg: "createSession failed", stage: "server.mjs#/admin/login POST", requestId: __lreqid }));
+          return;
+        }
+        try { auth.appendAudit({ ip: req.socket.remoteAddress || "?", user: __luser, action: "login", ok: true }); } catch (_) {}
+        res.writeHead(302, { location: "/admin", "set-cookie": "wxd_sid=" + __sessId + "; HttpOnly; SameSite=Lax; Path=/; Max-Age=" + (7 * 24 * 3600) });
+        res.end();
+        return;
+      });
+      return;
+    }
+
+    // --- /admin/logout：GET / POST 都接受 ---
+    if (u.pathname === "/admin/logout" && (req.method === "POST" || req.method === "GET")) {
+      var __logoutSid = __adminCookies.wxd_sid;
+      if (__logoutSid) { try { auth.destroySession(__logoutSid); } catch (_) {} }
+      try { auth.appendAudit({ ip: req.socket.remoteAddress || "?", user: (req.session && req.session.user) || "?", action: "logout", ok: true }); } catch (_) {}
+      res.writeHead(302, { location: "/admin/login", "set-cookie": "wxd_sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0" });
+      res.end();
+      return;
+    }
+
+    // --- /admin/api/me：当前用户态 JSON ---
+    if (u.pathname === "/admin/api/me") {
+      if (!req.session) { res.writeHead(302, { location: "/admin/login" }); res.end(); return; }
+      var __meReqId = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({
+        username: req.session.user,
+        loginAt: req.session.createdAt,
+        hasEnvOverride: !!(auth.hasEnvOverride && auth.hasEnvOverride()),
+        request_id: __meReqId
+      }));
+      return;
+    }
+
+    // --- /api/admin/password：改密 ---
+    if (u.pathname === "/api/admin/password" && req.method === "POST") {
+      if (!req.session) {
+        var __pwReqId = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+        res.writeHead(401, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error_code: "WXD-AUTH-0013", message: "session 已失效", stage: "server.mjs#/api/admin/password", request_id: __pwReqId }));
+        return;
+      }
+      var __pwBody = "";
+      req.on("data", function (c) { __pwBody += c; });
+      req.on("end", function () {
+        var __pwParams = {};
+        try { __pwParams = JSON.parse(__pwBody || "{}"); } catch (_) { __pwParams = {}; }
+        var __op = __pwParams.oldPassword || "";
+        var __np = __pwParams.newPassword || "";
+        var __pwReqId2 = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+        var __cpResult;
+        try { __cpResult = auth.changePassword(__op, __np, req.session.user); } catch (_) { __cpResult = { ok: false, error_code: "WXD-AUTH-0006", message: "changePassword threw" }; }
+        if (__cpResult && __cpResult.ok) {
+          try { auth.appendAudit({ ip: req.socket.remoteAddress || "?", user: req.session.user, action: "change_password", ok: true }); } catch (_) {}
+        } else {
+          try { auth.appendAudit({ ip: req.socket.remoteAddress || "?", user: req.session.user, action: "change_password", ok: false, error_code: (__cpResult && __cpResult.error_code) || "WXD-AUTH-0007" }); } catch (_) {}
+        }
+        var __httpCode = (__cpResult && __cpResult.ok) ? 200 : ( __cpResult.error_code === "WXD-AUTH-0008" ? 400 : 401 );
+        res.writeHead(__httpCode, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify(Object.assign({ request_id: __pwReqId2 }, __cpResult)));
+        return;
+      });
+      return;
+    }
+
+    // --- /admin：控制台首页（带守卫 + 数据注入） ---
     if (u.pathname === "/admin" || u.pathname === "/admin/") {
+      if (!auth.isInitialized()) { res.writeHead(302, { location: "/admin/setup" }); res.end(); return; }
+      if (!req.session) { res.writeHead(302, { location: "/admin/login" }); res.end(); return; }
+      var __dashHtml = renderAdminDashboard(req, req.session);
+      if (__dashHtml === null) { res.writeHead(500, { "content-type": "text/plain; charset=utf-8" }); res.end("admin.html not found"); return; }
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(loadView("admin.html"));
+      res.end(__dashHtml);
       return;
     }
+
+    // --- /admin/qr：扫码页（带守卫 + {{username}} 注入） ---
     if (u.pathname === "/admin/qr") {
+      if (!auth.isInitialized()) { res.writeHead(302, { location: "/admin/setup" }); res.end(); return; }
+      if (!req.session) { res.writeHead(302, { location: "/admin/login" }); res.end(); return; }
+      var __qrHtml;
+      try { __qrHtml = readFileSync(path.join(VIEWS_DIR, "admin-qr.html"), "utf8"); } catch (e) { res.writeHead(500, { "content-type": "text/plain; charset=utf-8" }); res.end("admin-qr.html not found: " + e.message); return; }
+      __qrHtml = __qrHtml.split("{{username}}").join(adminHtmlEscape(req.session.user || "unknown"));
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(loadView("admin-qr.html"));
+      res.end(__qrHtml);
       return;
     }
+
+    // --- /admin/qr/start：申请二维码（带守卫） ---
     if (u.pathname === "/admin/qr/start" && req.method === "POST") {
+      if (!auth.isInitialized()) { res.writeHead(302, { location: "/admin/setup" }); res.end(); return; }
+      if (!req.session) { res.writeHead(302, { location: "/admin/login" }); res.end(); return; }
       try {
         var result = await admin.startQrSession();
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
@@ -518,6 +882,8 @@ var server = http.createServer(async function(req, res) {
       return;
     }
     if (u.pathname === "/admin/qr/status") {
+      if (!auth.isInitialized()) { res.writeHead(302, { location: "/admin/setup" }); res.end(); return; }
+      if (!req.session) { res.writeHead(302, { location: "/admin/login" }); res.end(); return; }
       var sessionKey = u.searchParams.get("session") || "";
       try {
         var status = await admin.pollQrStatus(sessionKey);
@@ -611,9 +977,58 @@ var server = http.createServer(async function(req, res) {
   }
 });
 
-server.listen(PORT, "127.0.0.1", function(){
-  console.log("ready · http://127.0.0.1:" + PORT);
-});
+// ---- 启动钩子：initAuth + storage.init → 失败写 audit 后退出（§六.C） ----
+//   * auth.mjs#initAuth：读回 data/auth.json + data/sessions.json；auth 损坏 → 抛 WXD-AUTH-0006
+//   * storage.mjs#init：ensureDirs + 预读 index + mirror
+//   两者任意失败 → 写 audit log + process.exit(1)，不进入 listen
+(async function bootstrap() {
+  try {
+    await storage.init();
+  } catch (e) {
+    try { auth.appendAudit({ action: "startup_storage_init_failed", ok: false, error_code: (e && e.error_code) || "WXD-STORAGE-0004", details: { message: e && e.message, stage: e && e.stage } }); } catch (_) {}
+    console.error("[server] storage init failed:", e && e.message);
+    process.exit(1);
+    return;
+  }
+  try {
+    await auth.initAuth();
+  } catch (e) {
+    try { auth.appendAudit({ action: "startup_auth_init_failed", ok: false, error_code: (e && e.error_code) || "WXD-AUTH-0006", details: { message: e && e.message, stage: e && e.stage } }); } catch (_) {}
+    console.error("[server] auth init failed:", e && e.message);
+    process.exit(1);
+    return;
+  }
+  server.listen(PORT, "127.0.0.1", function(){
+    console.log("ready · http://127.0.0.1:" + PORT);
+  });
+})();
+
+// ---- 优雅关闭（§六.C）：SIGTERM / SIGINT → drain sessions + flush admin.log，再 close server ----
+function gracefulShutdown(signal) {
+  console.log("[server] received " + signal + ", shutting down...");
+  try {
+    if (typeof auth._getSessions === "function" && auth._getSessions().size > 0) {
+      const sessions = auth._getSessions();
+      for (const sid of Array.from(sessions.keys())) {
+        try { auth.getSession(sid); } catch (_) {}
+      }
+    }
+  } catch (e) {
+    try { auth.appendAudit({ action: "shutdown_drain_sessions_failed", ok: false, details: { message: e && e.message } }); } catch (_) {}
+  }
+  try {
+    server.close(function () {
+      console.log("[server] closed cleanly");
+      process.exit(0);
+    });
+    setTimeout(function () { process.exit(0); }, 5000).unref();
+  } catch (e) {
+    console.error("[server] close error:", e && e.message);
+    process.exit(1);
+  }
+}
+process.on("SIGTERM", function () { gracefulShutdown("SIGTERM"); });
+process.on("SIGINT", function () { gracefulShutdown("SIGINT"); });
 
 // 可选：WECHAT_BOT=1 时把 agent 接入 weixin-agent-sdk 长轮询（DEV_PLAN.md §10.3 / §A.2）
 if (process.env.WECHAT_BOT === "1") {

@@ -1,4 +1,4 @@
-# 免费公众号下载器
+# 微信公众号在线下载器
 
 > 在本机浏览器里把公众号文章存成可移植的本地文件。
 
@@ -104,3 +104,46 @@ MIT — Copyright © 2026 super-mortal
 ## 清理
 
 项目自包含：删掉 `wechat_downloads/` 等于彻底卸载。`node_modules/` 是最大的一块，删之前可先 `npm install --prefix .` 之外的位置复用。
+
+## 数据持久化
+
+`微信公众号在线下载器` 在 `data/` 目录保存所有管理员态与归档数据。**pm2 重启 / 服务器重启 / 磁盘未损坏场景下不丢失**。
+
+### 持久化文件清单
+
+| 文件 | 内容 | 权限（Unix） |
+|---|---|---|
+| `data/auth.json` | 管理员密码 scrypt 哈希 + salt | `0600` |
+| `data/sessions.json` | 活跃 session（默认 7 天滑动续期） | `0600` |
+| `data/admin.log` | 审计日志（登录、改密、退出） | `0600` |
+| `data/auth-failures.json` | 登录失败记录 | `0600` |
+| `data/md/<pub-id>.md` | 抓取的 Markdown 原文 | 系统默认 |
+| `data/storage_mdc.json` | 归档索引 | 系统默认 |
+| `public/wechat/download/<slug>.html` + `<slug>.json` | 归档 HTML + 元数据 | 系统默认 |
+
+### 持久化保证
+
+- 写盘均使用 atomic rename（先写 `.tmp` 再 `fs.renameSync`），断电 / kill -9 不会写一半
+- 启动时从 `data/auth.json` + `data/sessions.json` 重读到内存（§六 §六.A）
+- `storage.mjs#init()` 启动加载归档索引（§六 §六.B）
+- 服务器优雅关闭：`SIGTERM` / `SIGINT` → 排空 sessions + flush admin.log → `server.close`
+
+### 备份与恢复
+
+```bash
+# 备份（§六.D）
+node -e "import('./storage.mjs').then(m => m.backupDataDir('./backups/$(date +%Y%m%d)'))"
+
+# 恢复（§六.E）
+node -e "import('./storage.mjs').then(m => m.restoreDataDir('./backups/20260101/wxd-backup.zip'))"
+```
+
+### 迁移指南
+
+从无鉴权版本（v2）升级到带鉴权版本（v4）：见 [MIGRATION.md](./MIGRATION.md)。
+
+## 安全说明
+
+- 默认无管理员账号时访问 `/admin` → 跳转 `/admin/setup`，**强制首次设置密码**（≥ 8 位）
+- 改密会自动销毁其他设备的 session
+- 紧急逃生口：`ADMIN_PASSWORD=新密码 pm2 restart ... --update-env`

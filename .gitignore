@@ -19,11 +19,16 @@ Thumbs.db
 *.bak
 *~
 
-# 微信下载器（P4 起）
-data/md/
+# 微信下载器（P4 起，含 §六 数据持久化）
+data/                     # data/auth.json / data/sessions.json / data/admin.log / data/auth-failures.json / data/index.json / data/md/
 public/wechat/download/*.html
 public/wechat/download/*.json
+backups/                  # §六.D 备份目录（storage.mjs#backupDataDir 产物）
 
 
 # domain 缓存（运行期生成，含部署域名；不入仓）
 .domain-cache.json
+
+# super-agent 运行产物（init_workspace 自动建；不入仓）
+.super-agent/runs/*/test-reports/
+.super-agent/runs/*/logs/

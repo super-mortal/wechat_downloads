@@ -1,6 +1,6 @@
-# wechat_downloads 部署文档
+# 微信公众号在线下载器 · 部署文档
 
-> 单人自部署指南。覆盖：环境、启动、扫码绑定、进程守护、Nginx 反代、任意域名部署、文件落盘、回执格式、故障排查。
+> 单人自部署指南。微信公众号在线下载器：环境、启动、扫码绑定、进程守护、Nginx 反代、任意域名部署、文件落盘、回执格式、故障排查。
 
 ---
 
@@ -400,3 +400,52 @@ proxy_set_header X-Forwarded-Host  $host;     # ← 必须
 > · v1 · 2026-09-17
 
 
+
+---
+
+## Y. 数据持久化与备份
+
+### Y.1 持久化清单
+
+见 [README.md §数据持久化](./README.md#数据持久化)。**核心：`data/` 目录 + `public/wechat/download/`**。
+
+### Y.2 备份脚本
+
+在 crontab 中加入：
+
+```cron
+# 每日凌晨 3 点备份（保留 30 天）
+0 3 * * * cd /path/to/wechat_downloads && node -e "import('./storage.mjs').then(m => m.backupDataDir('./backups/$(date +\%Y\%m\%d)'))" && find ./backups -maxdepth 1 -type d -mtime +30 -exec rm -rf {} \;
+```
+
+### Y.3 灾难恢复
+
+```bash
+# 1. 停服
+pm2 stop wechat-downloads
+
+# 2. 备份当前 data/（以防恢复出错）
+mv data data_backup
+
+# 3. 解压备份
+node -e "import('./storage.mjs').then(m => m.restoreDataDir('./backups/20260101/wxd-backup.zip'))"
+
+# 4. 启动
+pm2 start wechat-downloads
+
+# 5. 验证
+curl https://your.domain/admin/api/me  # 应返回当前用户
+```
+
+### Y.4 注意事项
+
+- **`data/` 不要放在 git 仓库**（已在 `.gitignore` 排除）
+- **不要手动改 `auth.json` / `sessions.json`**：所有写入均走 atomic rename，手改会被覆盖
+- **磁盘满**会触发 `WXD-STORAGE-0006` 错误，监控 data 目录大小
+- **`backups/`** 也建议加 cron 清理（保留 30 天滚动）
+
+### Y.5 优雅关闭
+
+`pm2` 默认发送 `SIGINT`，本项目会捕获并优雅退出（§六 §六.C）。如果用 `kill -9` 强制杀掉：
+- 已写入的 session / admin.log 不丢失（atomic rename 保护）
+- 未写入的 session 创建 / 改密操作可能丢失（在内存未落盘阶段）

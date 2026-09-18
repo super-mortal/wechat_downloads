@@ -51,6 +51,16 @@ header{border-bottom:1px solid var(--ink);background:var(--paper);padding:24px 0
 .note{font-size:13px;color:var(--pencil);text-align:center;margin:0 0 36px;}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 18px;font:13px/1.7 ui-monospace,Consolas,monospace;color:var(--pencil);margin:6px 0 0;}
 .kv b{color:var(--ink);}
+
+.topbar-user { font-size: 13px; color: var(--pencil); letter-spacing: .1em; padding: 6px 14px; border: 1px solid var(--border); border-radius: 3px; }
+.cp-dialog { border: 1px solid var(--ink); padding: 24px; border-radius: 3px; background: var(--paper); color: var(--ink); max-width: 420px; }
+.cp-dialog::backdrop { background: rgba(0,0,0,.4); }
+.cp-dialog form { display: flex; flex-direction: column; gap: 12px; }
+.cp-dialog label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--pencil); letter-spacing: .1em; }
+.cp-dialog input { padding: 8px 10px; border: 1px solid var(--ink); border-radius: 3px; font: 16px ui-monospace, Consolas, monospace; background: var(--paper); color: var(--ink); }
+.cp-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+.cp-actions button { padding: 6px 14px; border: 1px solid var(--ink); background: var(--paper); color: var(--ink); border-radius: 3px; cursor: pointer; }
+.cp-actions button[type="submit"] { background: var(--ink); color: var(--paper); }
 </style>
 </head>
 <body>
@@ -61,6 +71,11 @@ header{border-bottom:1px solid var(--ink);background:var(--paper);padding:24px 0
       <div class="hd-links">
         <a class="blog-link" href="/admin">← 说明页</a>
         <a class="blog-link" href="/">首页</a>
+        <span class="topbar-user">当前：<b>{{username}}</b></span>
+        <a class="blog-link" href="#" onclick="document.getElementById('cp-adminqr').showModal(); return false;">修改密码</a>
+        <form method="post" action="/admin/logout" style="display:inline">
+          <button type="submit" class="blog-link">退出</button>
+        </form>
       </div>
     </div>
   </header>
@@ -291,6 +306,46 @@ header{border-bottom:1px solid var(--ink);background:var(--paper);padding:24px 0
   // 页面打开立即发起
   startSession();
 })();
+</script>
+<dialog id="cp-adminqr" class="cp-dialog">
+  <form method="post" action="/api/admin/password" onsubmit="return submitPasswordChange(event, 'cp-adminqr')">
+    <h3>修改密码</h3>
+    <label>旧密码<input type="password" name="oldPassword" required></label>
+    <label>新密码（≥ 8 位）<input type="password" name="newPassword" minlength="8" required></label>
+    <label>确认新密码<input type="password" name="newPassword2" minlength="8" required></label>
+    <div class="cp-actions">
+      <button type="button" onclick="document.getElementById('cp-adminqr').close()">取消</button>
+      <button type="submit">提交</button>
+    </div>
+    <pre class="err" id="cp-adminqr-err" hidden></pre>
+  </form>
+</dialog>
+<script>
+async function submitPasswordChange(ev, dialogId) {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  if (fd.get('newPassword') !== fd.get('newPassword2')) {
+    const err = document.getElementById(dialogId + '-err');
+    err.hidden = false;
+    err.textContent = '[WXD-AUTH-0009] 两次密码不一致\nstage: client\nrequest_id: ' + crypto.randomUUID();
+    return false;
+  }
+  const res = await fetch('/api/admin/password', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ oldPassword: fd.get('oldPassword'), newPassword: fd.get('newPassword') })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (data.ok) {
+    alert('密码已修改，其他设备的登录已失效');
+    location.reload();
+  } else {
+    const err = document.getElementById(dialogId + '-err');
+    err.hidden = false;
+    err.textContent = '[' + (data.error_code || 'WXD-AUTH-0008') + '] ' + (data.message || '修改失败') + '\nstage: server.mjs#/api/admin/password\nrequest_id: ' + (data.request_id || crypto.randomUUID());
+  }
+  return false;
+}
 </script>
 </body>
 </html>

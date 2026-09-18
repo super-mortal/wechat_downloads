@@ -7,6 +7,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { atomicWriteJsonAsync } from "./auth.mjs";
+import { makeZip } from "./zip.mjs";
 
 // ---- 路径解析（相对本文件即项目根） ----
 const __filename = fileURLToPath(import.meta.url);
@@ -27,6 +29,9 @@ const ERROR_CODES = {
   "WXD-STORAGE-0001": { http: 500, message: "读 / 写 data/index.json 失败" },
   "WXD-STORAGE-0002": { http: 500, message: "slug 冲突且 MD5 不一致" },
   "WXD-STORAGE-0003": { http: 500, message: "Markdown / HTML 写盘失败" },
+  "WXD-STORAGE-0004": { http: 500, message: "data 目录不可写（备份 / 恢复失败）" },
+  "WXD-STORAGE-0005": { http: 500, message: "备份文件不存在或损坏" },
+  "WXD-STORAGE-0006": { http: 500, message: "atomic rename 失败（磁盘满 / 权限不足）" },
 };
 
 class StorageError extends Error {
@@ -101,22 +106,18 @@ export function buildSlug(url, title, now) {
 }
 
 // ---- 原子写（tmp + rename） ----
+//   委托给 auth.mjs#atomicWriteJsonAsync，行为一致；抛出时由调用方包装 WXD-STORAGE-0003 / 0006
 async function atomicWriteFile(targetPath, data) {
-  const dir = path.dirname(targetPath);
-  await fsp.mkdir(dir, { recursive: true });
-  const tmpPath = targetPath + ".tmp-" + crypto.randomBytes(4).toString("hex");
-  await fsp.writeFile(tmpPath, data);
   try {
-    await fsp.rename(tmpPath, targetPath);
+    await atomicWriteJsonAsync(targetPath, data, undefined);
   } catch (e) {
-    // 兜底：rename 失败时尝试 copyFile + unlink（Windows 上偶发）
-    try {
-      await fsp.copyFile(tmpPath, targetPath);
-      await fsp.unlink(tmpPath);
-    } catch (e2) {
-      try { await fsp.unlink(tmpPath); } catch (_) {}
-      throw e2;
+    if (e && e.code === "EACCES") {
+      throw new StorageError("WXD-STORAGE-0004", "storage.mjs#atomicWriteFile", { reason: e.message, targetPath });
     }
+    if (e && e.code === "ENOSPC") {
+      throw new StorageError("WXD-STORAGE-0006", "storage.mjs#atomicWriteFile", { reason: e.message, targetPath });
+    }
+    throw new StorageError("WXD-STORAGE-0006", "storage.mjs#atomicWriteFile", { reason: e && e.message, targetPath });
   }
 }
 
@@ -265,6 +266,255 @@ export async function ensureDirs() {
   await fsp.mkdir(paths.dataDir, { recursive: true });
   await fsp.mkdir(paths.mdDir, { recursive: true });
   await fsp.mkdir(paths.publicDir, { recursive: true });
+}
+
+// ---- init：启动钩子 ----
+//   1) ensureDirs：创建 data/ data/md/ public/wechat/download/（已存在则跳过）
+//   2) 从 data/index.json 预热读取 → 如果文件不存在 / 损坏则返回空数组（不影响首次启动）
+//   3) 同步 mirrorIndexToPublic：保证 public 端 index 跟 data 端一致
+//   调用方：server.mjs 在 listen 之前 await storage.init()
+export async function init() {
+  await ensureDirs();
+  // 预读 index（损坏不抛：startup 启动钩子对读写错误返回 500 但不退出；这里只是 warm-up）
+  try {
+    const idx = await readIndex();
+    if (Array.isArray(idx) && idx.length > 0) {
+      try { await mirrorIndexToPublic(); } catch (_) {}
+    }
+  } catch (e) {
+    // 损坏：写一条审计日志（如果 auth 模块已加载则用 appendAudit，否则吞掉）
+    try {
+      const { appendAudit } = await import("./auth.mjs");
+      appendAudit({ action: "init_load_index_failed", ok: false, details: { message: e && e.message } });
+    } catch (_) {}
+  }
+}
+
+// ---- 备份 / 恢复（§六.D. 备份恢复） ----
+//   实现：基于 zip.mjs#makeZip 的 store-only ZIP；
+//         zip 内目录布局：
+//           data/index.json
+//           data/md/<slug>.md
+//           public/wechat/download/<slug>.html
+//           public/wechat/download/index.json
+//         （不打包 data/auth.json / data/sessions.json / data/admin.log / data/auth-failures.json）
+//   outDir：备份目录（默认项目根 backups/）；最终文件 = outDir/wxd-backup-<YYYYMMDD-HHMM>.zip
+//   失败抛 WXD-STORAGE-0004（目录不可写）或 WXD-STORAGE-0006（写盘失败）
+
+// 列出要打包的文件（相对项目根）
+async function _listBackupFiles() {
+  const out = [];
+  // 1) data/index.json
+  try {
+    const st = await fsp.stat(paths.indexPath);
+    if (st.isFile()) out.push({ abs: paths.indexPath, rel: "data/index.json" });
+  } catch (_) {}
+  // 2) data/md/*.md
+  try {
+    const names = await fsp.readdir(paths.mdDir);
+    for (const n of names) {
+      if (typeof n === "string" && n.endsWith(".md")) {
+        const abs = path.join(paths.mdDir, n);
+        try {
+          const st = await fsp.stat(abs);
+          if (st.isFile()) out.push({ abs, rel: "data/md/" + n });
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  // 3) public/wechat/download/index.json + *.html
+  try {
+    const names = await fsp.readdir(paths.publicDir);
+    for (const n of names) {
+      if (typeof n !== "string") continue;
+      const abs = path.join(paths.publicDir, n);
+      try {
+        const st = await fsp.stat(abs);
+        if (!st.isFile()) continue;
+      } catch (_) { continue; }
+      if (n === "index.json") out.push({ abs, rel: "public/wechat/download/index.json" });
+      else if (n.endsWith(".html")) out.push({ abs, rel: "public/wechat/download/" + n });
+    }
+  } catch (_) {}
+  return out;
+}
+
+export async function backupDataDir(outDir) {
+  // 1) 准备 outDir
+  const targetDir = outDir && typeof outDir === "string"
+    ? outDir
+    : path.join(PROJECT_ROOT, "backups");
+  try {
+    await fsp.mkdir(targetDir, { recursive: true });
+  } catch (e) {
+    throw new StorageError("WXD-STORAGE-0004", "storage.mjs#backupDataDir", { reason: e && e.message, outDir: targetDir });
+  }
+  // 2) 列举 + 读取文件
+  const files = await _listBackupFiles();
+  if (!files.length) {
+    // 没有任何归档数据：仍然生成一个空 zip（manifest.txt 说明），避免下游 null 判断
+    files.push({ abs: null, rel: "MANIFEST.txt", text: "empty backup - no archive files yet\n" });
+  }
+  // 3) 组装 zip entries
+  const entries = [];
+  for (const f of files) {
+    let content;
+    if (f.text != null) {
+      content = Buffer.from(f.text, "utf8");
+    } else {
+      try {
+        content = await fsp.readFile(f.abs);
+      } catch (e) {
+        throw new StorageError("WXD-STORAGE-0006", "storage.mjs#backupDataDir", { reason: e && e.message, file: f.rel });
+      }
+    }
+    entries.push({ name: f.rel, content: content });
+  }
+  // 4) 生成 zip
+  let buf;
+  try {
+    buf = makeZip(entries);
+  } catch (e) {
+    throw new StorageError("WXD-STORAGE-0006", "storage.mjs#backupDataDir", { reason: e && e.message });
+  }
+  // 5) 写入 outDir（atomic rename）
+  const stamp = (function () {
+    const d = new Date();
+    const ms = d.getTime() + 8 * 3600 * 1000;
+    const b = new Date(ms);
+    const pad = (n) => (n < 10 ? "0" + n : "" + n);
+    return b.getUTCFullYear() + pad(b.getUTCMonth() + 1) + pad(b.getUTCDate()) + "-" + pad(b.getUTCHours()) + pad(b.getUTCMinutes()) + pad(b.getUTCSeconds());
+  })();
+  const fileName = "wxd-backup-" + stamp + ".zip";
+  const targetPath = path.join(targetDir, fileName);
+  try {
+    await atomicWriteJsonAsync(targetPath, buf);
+  } catch (e) {
+    throw new StorageError("WXD-STORAGE-0004", "storage.mjs#backupDataDir", { reason: e && e.message, targetPath });
+  }
+  return { path: targetPath, count: entries.length, bytes: buf.length };
+}
+
+// ---- restoreDataDir ----
+//   zipPath: 备份文件绝对路径
+//   行为：
+//     * 不覆盖现有文件（如果目标已存在 → 跳过并在返回里累计；安全失败模式）
+//     * 解压后调用 mirrorIndexToPublic 保证两端 index 同步
+//   失败抛 WXD-STORAGE-0005（备份文件不存在 / 损坏）
+
+function _findEocd(buf) {
+  // 找 EOCD record (0x06054b50)
+  const SIG = 0x06054b50;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 65557; i--) {
+    if (buf.readUInt32LE(i) === SIG) return i;
+  }
+  return -1;
+}
+
+function _crc32(buf) {
+  // 与 zip.mjs#crc32 一致的算法（PKZIP polynomial）
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) {
+    c ^= buf[i];
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1));
+  }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+export async function restoreDataDir(zipPath) {
+  if (typeof zipPath !== "string" || !zipPath) {
+    throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "zipPath empty" });
+  }
+  let buf;
+  try {
+    buf = await fsp.readFile(zipPath);
+  } catch (e) {
+    throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "cannot read zip: " + (e && e.message), zipPath });
+  }
+  // 解析 EOCD
+  const eocdPos = _findEocd(buf);
+  if (eocdPos < 0) {
+    throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "EOCD not found", zipPath });
+  }
+  const totalEntries = buf.readUInt16LE(eocdPos + 10);
+  const centralSize = buf.readUInt32LE(eocdPos + 12);
+  const centralOffset = buf.readUInt32LE(eocdPos + 16);
+  if (centralOffset + centralSize > buf.length) {
+    throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "central dir out of range", zipPath });
+  }
+  let pos = centralOffset;
+  const restored = [];
+  const skipped = [];
+  for (let i = 0; i < totalEntries; i++) {
+    if (pos + 46 > buf.length) {
+      throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "central entry out of range", zipPath });
+    }
+    if (buf.readUInt32LE(pos) !== 0x02014b50) {
+      throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "bad central entry signature", zipPath });
+    }
+    const nameLen = buf.readUInt16LE(pos + 28);
+    const extraLen = buf.readUInt16LE(pos + 30);
+    const commentLen = buf.readUInt16LE(pos + 32);
+    const localOffset = buf.readUInt32LE(pos + 42);
+    const compSize = buf.readUInt32LE(pos + 20);
+    const compMethod = buf.readUInt16LE(pos + 10);
+    const name = buf.slice(pos + 46, pos + 46 + nameLen).toString("utf8");
+    // 跳过目录 / MANIFEST / 备份专属元数据
+    if (name.endsWith("/") || name === "MANIFEST.txt") {
+      pos += 46 + nameLen + extraLen + commentLen;
+      continue;
+    }
+    // 读 local header
+    if (localOffset + 30 > buf.length) {
+      throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "local header out of range", file: name });
+    }
+    if (buf.readUInt32LE(localOffset) !== 0x04034b50) {
+      throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "bad local entry signature", file: name });
+    }
+    const lNameLen = buf.readUInt16LE(localOffset + 26);
+    const lExtraLen = buf.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + lNameLen + lExtraLen;
+    if (compMethod !== 0) {
+      throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "unsupported compression method: " + compMethod, file: name });
+    }
+    if (dataStart + compSize > buf.length) {
+      throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "entry data out of range", file: name });
+    }
+    const data = buf.slice(dataStart, dataStart + compSize);
+    // 安全校验：白名单路径（不允许 .. 或绝对路径）
+    if (name.includes("..") || name.startsWith("/") || name.startsWith("\\")) {
+      throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "unsafe entry path", file: name });
+    }
+    const targetAbs = path.join(PROJECT_ROOT, name);
+    // 限制必须落在 PROJECT_ROOT 下
+    const rel = path.relative(PROJECT_ROOT, targetAbs);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "path escapes project root", file: name });
+    }
+    // 不覆盖现有
+    let existed = false;
+    try {
+      const st = await fsp.stat(targetAbs);
+      if (st.isFile()) existed = true;
+    } catch (_) {}
+    if (existed) {
+      skipped.push(name);
+    } else {
+      try {
+        await fsp.mkdir(path.dirname(targetAbs), { recursive: true });
+        await fsp.writeFile(targetAbs, data);
+      } catch (e) {
+        throw new StorageError("WXD-STORAGE-0005", "storage.mjs#restoreDataDir", { reason: "write failed: " + (e && e.message), file: name });
+      }
+      restored.push(name);
+    }
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+  // 同步 mirror（如果 index.json 被恢复了）
+  if (restored.some(n => n === "data/index.json" || n === "public/wechat/download/index.json")) {
+    try { await mirrorIndexToPublic(); } catch (_) {}
+  }
+  return { restored: restored, skipped: skipped, count: restored.length };
 }
 
 // ---- 路径覆盖（仅供测试使用） ----
