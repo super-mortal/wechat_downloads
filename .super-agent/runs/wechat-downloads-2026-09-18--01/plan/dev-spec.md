@@ -66,6 +66,10 @@ WXD-{MODULE}-{NNNN}
 
 | 错误码 | 模块 | HTTP | 含义 | 抛出位置 |
 |---|---|---|---|---|
+| WXD-SYS-0001 | sys | 500 | Chromium 不可执行（首次启动预检失败） | engine.mjs#openBrowser |
+| WXD-BOT-0001 | bot | 503 | 服务未以 WECHAT_BOT=1 启动，无法扫码绑定 | admin.mjs#startQrSession |
+| WXD-HTTP-0005 | http | 400 | POST /download URL 域名非白名单（非 mp.weixin.qq.com） | server.mjs#/download |
+| WXD-HTTP-0004 | http | 401 | POST /download 未登录（需要先登录管理后台） | server.mjs#/download |
 | WXD-STORAGE-0006 | storage | 500 | atomic rename 失败（磁盘满 / 权限不足） | auth.mjs#atomicWriteJson / storage.mjs#atomicWriteFile |
 | WXD-STORAGE-0005 | storage | 500 | 备份文件不存在或损坏 | storage.mjs#restoreDataDir |
 | WXD-STORAGE-0004 | storage | 500 | data 目录不可写（备份/恢复失败） | storage.mjs#backupDataDir |

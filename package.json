@@ -5,7 +5,8 @@
   "main": "cli.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "cli": "node cli.mjs"
+    "cli": "node cli.mjs",
+    "postinstall": "playwright install chromium"
   },
   "keywords": [
     "wechat",
@@ -18,8 +19,11 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
-    "playwright": "^1.62.1",
+    "playwright": "1.62.1",
     "weixin-agent-sdk": "^0.5.0",
     "@tencent-weixin/openclaw-weixin": "^2.4.9"
+  },
+  "engines": {
+    "node": ">=24.16.0 <25 || >=26.1.0"
   }
 }

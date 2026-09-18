@@ -20,8 +20,23 @@ const FASTER_LAUNCH_ARGS = [
   "--disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache"
 ];
 
+function precheckChromium() {
+  try {
+    const exe = realEngine.chromium.executablePath();
+    if (!exe) return;
+    require("node:fs").accessSync(exe);
+  } catch (_) {
+    const hint = "Chromium 不可执行：路径未找到。\n\n修复：执行 `npx playwright install chromium` 或重新跑 `npm install`（会自动触发 postinstall）。";
+    const e = new Error(hint);
+    e.error_code = "WXD-SYS-0001";
+    e.stage = "engine.mjs#openBrowser";
+    throw e;
+  }
+}
+
 export async function openBrowser(opts) {
   opts = opts || {};
+  precheckChromium();
   const headless = opts.headless !== false;
   // 强制走完整 chromium（ms-playwright\chromium-1234\chrome-win64\chrome.exe），
   // 而不是 chrome-headless-shell.exe；后者是 console 子系统 exe，在 Windows 上会弹控制台窗口。

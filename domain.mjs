@@ -61,10 +61,26 @@ export function computePublicBaseUrl(req) {
   return `${proto}://${host}`;
 }
 
+function isPrivateOrLocalHost(hostname) {
+  if (!hostname) return true;
+  const h = hostname.toLowerCase().split(":")[0];
+  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]") return true;
+  if (h.startsWith("127.")) return true;
+  if (h.startsWith("10.")) return true;
+  if (h.startsWith("192.168.")) return true;
+  const m = h.match(/^172\.(\d+)\./);
+  if (m) { const n = parseInt(m[1], 10); if (n >= 16 && n <= 31) return true; }
+  if (h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".lan")) return true;
+  return false;
+}
+
 export function recordPublicBaseUrl(req) {
   if (process.env.PUBLIC_BASE_URL) return;
   try {
     const url = computePublicBaseUrl(req);
+    // 过滤本地/私网地址：避免 .domain-cache.json 被本机 curl 污染
+    const h = (() => { try { return new URL(url).hostname; } catch (_) { return ""; } })();
+    if (isPrivateOrLocalHost(h)) return;
     _cachedBaseUrl = url;
     writeCacheToFile(url);
   } catch (_) {}

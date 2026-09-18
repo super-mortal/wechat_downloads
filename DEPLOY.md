@@ -14,11 +14,11 @@
 
 | 工具 | 版本要求 | 说明 |
 |---|---|---|
-| **Node.js** | **≥ 22** | `weixin-agent-sdk` 要求 Node ≥ 22（见其 `engines` 字段） |
+| **Node.js** | **>=24.16.0 <25 || >=26.1.0** | weixin-agent-sdk + openclaw-weixin 要求；package.json engines 已声明 |
 | **git** | 任意稳定版 | 克隆仓库 |
 | **npm** | 随 Node 自带 | 安装依赖（建议 npm ≥ 10） |
 
-> 如果服务器上还没有 Node 22，推荐用 [nvm](https://github.com/nvm-sh/nvm) 或 [fnm](https://github.com/Schniz/fnm) 装一个；`weixin-agent-sdk` 在更低的 Node 版本上无法启动。
+> 如果服务器上还没有符合要求的 Node 版本，推荐用 [nvm](https://github.com/nvm-sh/nvm) 或 [fnm](https://github.com/Schniz/fnm) 装一个；`weixin-agent-sdk` 在更低的 Node 版本上无法启动。
 
 ### 可选工具
 
@@ -33,6 +33,14 @@
 git clone <你的仓库地址>
 cd wechat_downloads
 npm install
+```
+
+`npm install` 会自动运行 `postinstall` 脚本：`playwright install chromium` 下载 Chromium 浏览器到本地缓存。
+
+如失败可手动执行：
+
+```bash
+npx playwright install chromium
 ```
 
 `npm install` 会拉取三个运行依赖：

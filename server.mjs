@@ -16,7 +16,7 @@ import * as auth from "./auth.mjs";
 import { start as startBot, Bot } from "weixin-agent-sdk";
 import { agent } from "./agent.mjs";
 
-const PORT = 3915;
+const PORT = Number(process.env.PORT) || 3915;
 
 var VIEWS_DIR = path.join(process.cwd(), "views");
 function loadView(name) {
@@ -597,6 +597,11 @@ var server = http.createServer(async function(req, res) {
       return;
     }
     if (u.pathname === "/download" && req.method === "POST") {
+      // 高危：/download 必须鉴权 + URL 白名单（mp.weixin.qq.com）
+      var __dlCookie = parseCookies(req);
+      var __dlSid = __dlCookie.wxd_sid;
+      var __dlSess = __dlSid ? auth.getSession(__dlSid) : null;
+      if (!__dlSess) { res.writeHead(401, { "content-type": "application/json; charset=utf-8" }); res.end(JSON.stringify({ error_code: "WXD-HTTP-0004", message: "需要先登录管理后台才能下载", stage: "server.mjs#/download", request_id: (crypto.randomUUID ? crypto.randomUUID() : "n/a") })); return; }
       var body = await readBody(req);
       var payload;
       try { payload = JSON.parse(body.toString("utf8")); } catch (e) {
@@ -607,6 +612,17 @@ var server = http.createServer(async function(req, res) {
       var urls = Array.isArray(payload.urls) ? payload.urls : [];
       var fmts = Array.isArray(payload.formats) ? payload.formats : [];
       var split = !!payload.split;
+      // URL 白名单：仅允许 mp.weixin.qq.com（含子域）
+      for (var __i = 0; __i < urls.length; __i++) {
+        var __u = urls[__i];
+        var __h;
+        try { __h = new URL(__u).hostname.toLowerCase(); } catch (_) { __h = ""; }
+        if (__h !== "mp.weixin.qq.com") {
+          res.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ error_code: "WXD-HTTP-0005", message: "仅允许 mp.weixin.qq.com 域名，已拒绝: " + __h, stage: "server.mjs#/download", request_id: (crypto.randomUUID ? crypto.randomUUID() : "n/a") }));
+          return;
+        }
+      }
       if (!urls.length || !fmts.length) {
         res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
         res.end("missing urls or formats");

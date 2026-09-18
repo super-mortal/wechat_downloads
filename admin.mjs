@@ -19,6 +19,7 @@ const ERROR_CODES = {
   "WXD-AUTH-0001": { http: 401, message: "startWeixinLoginWithQr 返回非 QR 数据" },
   "WXD-AUTH-0002": { http: 401, message: "waitForWeixinLogin timeout（>300s）" },
   "WXD-ADMIN-0001": { http: 404, message: "/admin/qr/status 的 session 不存在 / 过期" },
+  "WXD-BOT-0001": { http: 503, message: "服务未以 WECHAT_BOT=1 启动，无法扫码绑定" },
 };
 
 class AdminError extends Error {
@@ -100,7 +101,15 @@ function parseQrFromLogMessage(msg) {
   return m ? m[1] : null;
 }
 
+export function isBotEnabled() {
+  return process.env.WECHAT_BOT === "1" || process.env.WECHAT_BOT === "true";
+}
+
 export async function startQrSession() {
+  if (!isBotEnabled()) {
+    const rid = randomUUID();
+    throw new AdminError("WXD-BOT-0001", STAGE.startQrSession, rid, { hint: "请用 WECHAT_BOT=1 npm start 启动服务" });
+  }
   const requestId = randomUUID();
   const sessionKey = randomUUID();
 
