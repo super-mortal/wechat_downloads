@@ -388,7 +388,7 @@ function renderListHtml(entries) {
       var createdAt = htmlEscape(e.created_at || "");
       rows.push(
         '<div class="entry">' +
-          '<span class="t"><a href="' + slug + '.html">' + title + '</a></span>' +
+          '<span class="t"><a href="/wechat/download/' + slug + '.html">' + title + '</a></span>' +
           '<span class="meta">' + author + '<span class="sep">·</span>' + createdAt + '</span>' +
         '</div>'
       );

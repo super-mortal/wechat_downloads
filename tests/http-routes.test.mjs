@@ -122,6 +122,13 @@ test("a. GET /wechat/download 返回 200 HTML（列表页路由注册）", async
   assert.match(r.headers["content-type"], /text\/html/);
   assert.match(r.body, /已收录/);
   assert.match(r.body, /test-article-test01\.html/);
+
+  // 回归保护：列表项 link 必须是绝对路径 /wechat/download/<slug>.html，不能是相对路径
+  // （否则在无尾斜杠 URL 下，浏览器把 /wechat/download 当 file，把 <slug>.html 解析到根目录）
+  assert.ok(
+    r.body.includes("href=\"/wechat/download/2026-09-17-test-article-test01.html\""),
+    "列表 link 必须是绝对路径 /wechat/download/<slug>.html；body 前 800 字：" + r.body.slice(0, 800)
+  );
 });
 
 test("b. GET /wechat/download/<slug>.html 返回 200 HTML（单篇路由注册）", async () => {
