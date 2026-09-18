@@ -20,7 +20,8 @@ header{border-bottom:1px solid var(--ink);background:var(--paper);padding:24px 0
 .brand{font-weight:900;font-size:22px;letter-spacing:.05em;}
 .brand .mark{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:2px solid var(--ink);border-radius:4px;font-weight:900;font-size:20px;background:var(--paper);color:var(--ink);vertical-align:middle;margin-right:10px;font-family:"Noto Serif SC",Georgia,"Songti SC",serif;line-height:1;}
 .hd-links{display:flex;gap:10px;flex-wrap:wrap;}
-.blog-link{font-size:13px;color:var(--pencil);letter-spacing:.15em;border:1px solid var(--ink);padding:6px 14px;border-radius:3px;text-decoration:none;}
+.blog-link{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;font:inherit;font-size:13px;line-height:1;letter-spacing:.15em;color:var(--pencil);border:1px solid var(--ink);padding:6px 14px;border-radius:3px;text-decoration:none;background:var(--paper);cursor:pointer;height:32px;box-sizing:border-box;-webkit-appearance:none;appearance:none;}
+.blog-link:focus{outline:none;}
 .blog-link:hover{background:var(--ink);color:var(--paper);}
 .stage{margin:48px 0 18px;display:flex;align-items:center;justify-content:center;gap:14px;font-size:13px;letter-spacing:.3em;color:var(--pencil);text-transform:uppercase;}
 .stage .dot{width:10px;height:10px;border:1.5px solid var(--ink);border-radius:50%;background:var(--paper);}
@@ -73,7 +74,7 @@ header{border-bottom:1px solid var(--ink);background:var(--paper);padding:24px 0
         <a class="blog-link" href="/">首页</a>
         <span class="topbar-user">当前：<b>{{username}}</b></span>
         <a class="blog-link" href="#" onclick="document.getElementById('cp-adminqr').showModal(); return false;">修改密码</a>
-        <form method="post" action="/admin/logout" style="display:inline">
+        <form method="post" action="/admin/logout" style="display:inline-flex;align-items:center;margin:0;padding:0">
           <button type="submit" class="blog-link">退出</button>
         </form>
       </div>

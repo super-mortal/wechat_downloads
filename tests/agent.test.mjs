@@ -25,7 +25,7 @@ import {
 // 临时目录：避免污染真实 data/index.json
 let tmpRoot;
 let dataDir;
-let mdDir;
+
 let indexPath;
 let publicDir;
 let publicIndex;
@@ -37,11 +37,11 @@ const SAMPLE_URL = "https://mp.weixin.qq.com/s/FtWvOWI2kVVS_1sQiKNWbw";
 before(async () => {
   tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "wxd-agent-test-"));
   dataDir = path.join(tmpRoot, "data");
-  mdDir = path.join(dataDir, "md");
+
   indexPath = path.join(dataDir, "index.json");
   publicDir = path.join(tmpRoot, "public", "wechat", "download");
   publicIndex = path.join(publicDir, "index.json");
-  await fsp.mkdir(mdDir, { recursive: true });
+
   await fsp.mkdir(publicDir, { recursive: true });
   // 备份真实 data/index.json
   const realPath = path.resolve("data", "index.json");
@@ -71,7 +71,7 @@ beforeEach(async () => {
   _setPathsForTest({
     root: tmpRoot,
     dataDir,
-    mdDir,
+
     indexPath,
     publicDir,
     publicIndex,
@@ -79,11 +79,7 @@ beforeEach(async () => {
   // 清空 tmp 内的 index / md / html
   try { await fsp.unlink(indexPath); } catch (_) {}
   try { await fsp.unlink(publicIndex); } catch (_) {}
-  if (await exists(mdDir)) {
-    for (const f of await fsp.readdir(mdDir)) {
-      try { await fsp.unlink(path.join(mdDir, f)); } catch (_) {}
-    }
-  }
+
   if (await exists(publicDir)) {
     for (const f of await fsp.readdir(publicDir)) {
       try { await fsp.unlink(path.join(publicDir, f)); } catch (_) {}
@@ -103,16 +99,14 @@ async function exists(p) {
 function makeMockDownloadFactory(opts = {}) {
   const title = opts.title || "示例文章";
   const author = opts.author || "示例作者";
-  const mdBody = opts.mdBody || "# " + title + "\n\n这是正文";
   const htmlBody = opts.htmlBody || "<!doctype html><html><body><h1>" + title + "</h1></body></html>";
 
   return async () => {
     // 把 mock 产物写到 tmpRoot/mock-download/，避免污染真实目录
+    // 注意：bot 流程只下载 HTML（formats: ["html"]），mock 也只产 html，不再产 md
     const mockDir = path.join(tmpRoot, "mock-download");
     await fsp.mkdir(mockDir, { recursive: true });
-    const mdPath = path.join(mockDir, "mock-article.md");
     const htmlPath = path.join(mockDir, "mock-article.html");
-    await fsp.writeFile(mdPath, mdBody, "utf8");
     await fsp.writeFile(htmlPath, htmlBody, "utf8");
     return {
       ok: true,
@@ -124,7 +118,6 @@ function makeMockDownloadFactory(opts = {}) {
       imagesTotal: 0,
       split: false,
       outputs: [
-        { format: "md", filename: "mock-article.md", path: mdPath },
         { format: "html", filename: "mock-article.html", path: htmlPath },
       ],
     };
@@ -208,17 +201,19 @@ test("f. URL 命中 + 新增 → 返回一行 URL（落盘 + 写索引）", asyn
   assert.ok(!lines[1].includes("data/md"), "URL 行不应含本地路径 data/md");
   assert.ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(reply.text), "回执不应含 emoji");
 
-  // 验证落盘：data/md/<slug>.md 存在，public/wechat/download/<slug>.html 存在
+  // 验证落盘：bot 流程现在只落 HTML 到 public/wechat/download/，不再写 data/md/<slug>.md
+  // （Markdown 仅由首页下载时按需生成，不入 data/md，也不参与备份/恢复）
   const idx = await readIndex();
   assert.equal(idx.length, 1);
   const slug = idx[0].slug;
   assert.equal(idx[0].url, SAMPLE_URL);
-  const mdFile = path.join(mdDir, slug + ".md");
   const htmlFile = path.join(publicDir, slug + ".html");
-  assert.ok(await exists(mdFile), "md 文件应落盘到 data/md/");
   assert.ok(await exists(htmlFile), "html 文件应落盘到 public/wechat/download/");
-  const mdContent = await fsp.readFile(mdFile, "utf8");
-  assert.ok(mdContent.includes("新增文章标题"), "md 文件应包含标题");
+  // data/md/<slug>.md 必须不存在
+  const mdFile = path.join(dataDir, "md", slug + ".md");
+  assert.ok(!(await exists(mdFile)), "bot 流程不应再写 data/md/<slug>.md");
+  const htmlContent = await fsp.readFile(htmlFile, "utf8");
+  assert.ok(htmlContent.includes("新增文章标题"), "html 文件应包含标题");
   assert.equal(idx[0].html_url, "/wechat/download/" + slug + ".html");
 });
 

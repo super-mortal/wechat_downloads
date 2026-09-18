@@ -294,7 +294,6 @@ export async function init() {
 //   实现：基于 zip.mjs#makeZip 的 store-only ZIP；
 //         zip 内目录布局：
 //           data/index.json
-//           data/md/<slug>.md
 //           public/wechat/download/<slug>.html
 //           public/wechat/download/index.json
 //         （不打包 data/auth.json / data/sessions.json / data/admin.log / data/auth-failures.json）

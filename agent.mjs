@@ -11,7 +11,6 @@ import {
   buildSlug,
   addEntry,
   findByUrl,
-  writeMarkdown,
   writeHtml,
   mirrorIndexToPublic,
   buildEntry,
@@ -67,28 +66,28 @@ function makeAgentError(errorCode, message, stage) {
 }
 
 /**
- * 从 downloadArticle 返回的 outputs 数组里挑出 md / html 的内容（按 format 匹配，读取磁盘）。
+ * 从 downloadArticle 返回的 outputs 数组里挑出 html 的内容（按 format 匹配，读取磁盘）。
+ * bot 流程只保存 HTML，不再生成/读取 Markdown（Markdown 仅由首页下载时按需生成）。
  * 抓取失败 / 字段缺失时返回空串，不抛错（外层 catch 兜底）。
  * @param {Array<{format: string, path?: string}>} outputs
- * @returns {Promise<{ md: string, html: string }>}
+ * @returns {Promise<{ html: string }>}
  */
-async function readOutputsContent(outputs) {
-  let md = "";
+async function readHtmlContent(outputs) {
   let html = "";
-  if (!Array.isArray(outputs)) return { md, html };
+  if (!Array.isArray(outputs)) return { html };
   for (const o of outputs) {
     if (!o || typeof o !== "object") continue;
-    if (o.format === "md" && typeof o.path === "string") {
-      try { md = await fsp.readFile(o.path, "utf8"); } catch (_) { /* keep empty */ }
-    } else if (o.format === "html" && typeof o.path === "string") {
+    if (o.format === "html" && typeof o.path === "string") {
       try { html = await fsp.readFile(o.path, "utf8"); } catch (_) { /* keep empty */ }
     }
   }
-  return { md, html };
+  return { html };
 }
 
 /**
- * 主流程：抓取 + 落盘 + 索引 + 镜像 + 回执。
+ * 主流程：抓取 + 落盘（仅 HTML）+ 索引 + 镜像 + 回执。
+ * bot 流程不再保存 Markdown（Markdown 仅由首页下载时按需生成，不入 data/md）；
+ * 这样既减少磁盘占用，也避免 Markdown 文件参与备份/恢复链路。
  * 失败一律走 WXD-NET-0001，对应回执「该文章无法访问，换一条试试」。
  * @param {string} url
  * @param {string} baseUrl
@@ -97,7 +96,8 @@ async function readOutputsContent(outputs) {
 async function downloadAndReply(url, baseUrl) {
   let result;
   try {
-    result = await _downloadArticle({ url, formats: ["md", "html"], split: false });
+    // bot 流程只下载 HTML，不再要 md；首页 /download 仍然可以选 Markdown 格式
+    result = await _downloadArticle({ url, formats: ["html"], split: false });
   } catch (err) {
     console.error("[agent] downloadArticle 抛出", { url, err: err && err.message });
     return { text: TEXT_FETCH_FAIL };
@@ -111,14 +111,13 @@ async function downloadAndReply(url, baseUrl) {
   const title = (typeof result.title === "string" && result.title) ? result.title : "未命名";
   const author = (typeof result.author === "string" && result.author) ? result.author : "未知作者";
 
-  // 读取 md / html 真实内容（downloadArticle 写到磁盘，再读回走 storage.writeXxx 落 slug 路径）
-  const { md, html } = await readOutputsContent(result.outputs);
+  // 读取 HTML 真实内容（downloadArticle 写到磁盘，再读回走 storage.writeHtml 落 slug 路径）
+  const { html } = await readHtmlContent(result.outputs);
 
   // slug + 落盘（slug 来自 url + title，重复 URL 会在外层 findByUrl 先命中）
   const slug = buildSlug(url, title);
 
   try {
-    await writeMarkdown(slug, md);
     await writeHtml(slug, html);
   } catch (err) {
     console.error("[agent] 写盘失败", { slug, err: err && err.message });
@@ -126,8 +125,8 @@ async function downloadAndReply(url, baseUrl) {
     return { text: TEXT_FETCH_FAIL };
   }
 
-  // 写索引
-  const sizeBytes = Buffer.byteLength(md || "", "utf8");
+  // 写索引（size 用 html 字节数）
+  const sizeBytes = Buffer.byteLength(html || "", "utf8");
   const entry = buildEntry({ url, title, author, slug, sizeBytes });
   try {
     await addEntry(entry);

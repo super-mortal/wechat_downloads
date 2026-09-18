@@ -21,9 +21,11 @@ a:hover{border-bottom-color:var(--ink);}
 .topbar-user{color:var(--ink);font-weight:600;letter-spacing:.05em;}
 .topbar-meta{font:12px/1.4 ui-monospace,Consolas,monospace;color:var(--pencil);}
 .topbar-actions{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.topbar-actions form{display:inline-flex;align-items:center;margin:0;padding:0;}
 .badge{display:inline-block;font-size:11px;letter-spacing:.2em;padding:3px 10px;border:1px solid var(--ink);border-radius:3px;text-transform:uppercase;color:var(--ink);background:var(--paper);}
 .badge-warn{background:var(--hl);color:var(--ink);border-color:var(--ink);}
-.blog-link{font-size:13px;color:var(--pencil);letter-spacing:.15em;border:1px solid var(--ink);padding:6px 14px;border-radius:3px;text-decoration:none;background:var(--paper);cursor:pointer;font-family:inherit;}
+.blog-link{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;font:inherit;font-size:13px;line-height:1;letter-spacing:.15em;color:var(--pencil);border:1px solid var(--ink);padding:6px 14px;border-radius:3px;text-decoration:none;background:var(--paper);cursor:pointer;height:32px;box-sizing:border-box;-webkit-appearance:none;appearance:none;}
+.blog-link:focus{outline:none;}
 .blog-link:hover{background:var(--ink);color:var(--paper);}
 
 /* 卡片 grid */

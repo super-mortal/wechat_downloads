@@ -317,9 +317,9 @@ test("6.1 备份 → 删除 → restoreDataDir → 文件存在", async () => {
   await _saveRealFiles();
 
   // 用临时标记 slug 测试（不会与真实归档冲突）
+  // bot 流程已不再保存 Markdown → 备份 / 恢复链路不再涉及 data/md，只验证 html
   const testSlug = "2026-09-18-restore-test-zzzzzz";
   const testUrl = "https://mp.weixin.qq.com/s/restore-test-zzzzzz";
-  const testMdRel = "data/md/" + testSlug + ".md";
   const testHtmlRel = "public/wechat/download/" + testSlug + ".html";
 
   // 把这些文件加进真实 data/ + public/（确保 backup 能打包到）
@@ -327,7 +327,6 @@ test("6.1 备份 → 删除 → restoreDataDir → 文件存在", async () => {
   const prevIdx = await readIndex();
   prevIdx.push({ slug: testSlug, url: testUrl, title: "restore test", author: "tester" });
   await writeIndex(prevIdx);
-  await fsp.writeFile(path.join(DATA_DIR, "md", testSlug + ".md"), "# restore", "utf8");
   await writeHtml(testSlug, "<p>restore</p>");
   await mirrorIndexToPublic();
 
@@ -339,27 +338,20 @@ test("6.1 备份 → 删除 → restoreDataDir → 文件存在", async () => {
     assert.ok(r && r.path && fs.existsSync(r.path), "备份 zip 已生成：" + r.path);
 
     // 2) 删除测试文件（模拟磁盘丢失）
-    await fsp.unlink(path.join(DATA_DIR, "md", testSlug + ".md"));
     await fsp.unlink(path.join(PROJECT_ROOT, "public", "wechat", "download", testSlug + ".html"));
-    assert.equal(fs.existsSync(path.join(DATA_DIR, "md", testSlug + ".md")), false);
     assert.equal(fs.existsSync(path.join(PROJECT_ROOT, "public", "wechat", "download", testSlug + ".html")), false);
 
     // 3) restoreDataDir 把 zip 内文件写回 PROJECT_ROOT
     const r2 = await restoreDataDir(r.path);
     assert.ok(r2 && typeof r2.count === "number", "返回 result 对象");
 
-    // 4) 验证文件回来了
-    assert.ok(
-      fs.existsSync(path.join(DATA_DIR, "md", testSlug + ".md")),
-      "data/md/" + testSlug + ".md 应被还原"
-    );
+    // 4) 验证 html 回来了（bot 流程不再写 md，所以 data/md/* 不参与备份/恢复）
     assert.ok(
       fs.existsSync(path.join(PROJECT_ROOT, "public", "wechat", "download", testSlug + ".html")),
       "public/wechat/download/" + testSlug + ".html 应被还原"
     );
 
     // 5) 清理：删测试文件 + 还原 index
-    try { await fsp.unlink(path.join(DATA_DIR, "md", testSlug + ".md")); } catch (_) {}
     try { await fsp.unlink(path.join(PROJECT_ROOT, "public", "wechat", "download", testSlug + ".html")); } catch (_) {}
     const cleaned = prevIdx.filter((e) => e && e.slug !== testSlug);
     await writeIndex(cleaned);
