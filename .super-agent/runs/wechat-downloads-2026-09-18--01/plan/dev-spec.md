@@ -66,6 +66,8 @@ WXD-{MODULE}-{NNNN}
 
 | 错误码 | 模块 | HTTP | 含义 | 抛出位置 |
 |---|---|---|---|---|
+| WXD-SYS-0003 | sys | 500 | 备份配置读写失败 | backup-config.mjs#writeConfigToDisk |
+| WXD-SYS-0002 | sys | 500 | 自动备份调度失败（备份写入异常） | backup-config.mjs#runBackupNow |
 | WXD-SYS-0001 | sys | 500 | Chromium 不可执行（首次启动预检失败） | engine.mjs#openBrowser |
 | WXD-BOT-0001 | bot | 503 | 服务未以 WECHAT_BOT=1 启动，无法扫码绑定 | admin.mjs#startQrSession |
 | WXD-HTTP-0005 | http | 400 | POST /download URL 域名非白名单（非 mp.weixin.qq.com） | server.mjs#/download |

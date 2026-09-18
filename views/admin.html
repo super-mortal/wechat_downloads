@@ -93,9 +93,69 @@ dialog#cp::backdrop{background:rgba(26,26,26,0.45);}
     <section class="panel">
       <h2>系统状态</h2>
       <div class="kv">
-        <b>uptime</b><span>{{uptime}}</span>
         <b>data</b><span>{{dataSize}}</span>
+        <b>上次备份</b><span>{{lastBackupAt}}</span>
+        <b>备份文件</b><span>{{lastBackupFile}} ({{lastBackupSize}})</span>
+        <b>最近结果</b><span>{{bkLastResult}}</span>
       </div>
+      <div style="margin-top:14px">
+        <b style="display:inline-block;margin-right:8px">自动备份</b>
+        <select id="bkInterval" class="chip" style="margin-right:6px">
+          <option value="0">关闭</option>
+          <option value="6">每 6 小时</option>
+          <option value="24">每 24 小时</option>
+          <option value="168">每 168 小时（每周）</option>
+        </select>
+        <button type="button" class="blog-link" id="bkSave">保存</button>
+        <button type="button" class="blog-link" id="bkNow">立即备份</button>
+        <pre class="err" id="bkMsg" hidden></pre>
+      </div>
+      <script>
+      (function(){
+        var sel = document.getElementById("bkInterval");
+        var btnSave = document.getElementById("bkSave");
+        var btnNow = document.getElementById("bkNow");
+        var msg = document.getElementById("bkMsg");
+        function showMsg(text, isErr){
+          msg.hidden = !text;
+          msg.textContent = text || "";
+          msg.style.borderColor = isErr ? "#c00" : "#1A1A1A";
+          msg.style.color = isErr ? "#c00" : "#1A1A1A";
+        }
+        function fetchCfg(){
+          fetch("/api/admin/backup-config", { credentials: "same-origin" })
+            .then(function(r){ return r.json(); })
+            .then(function(j){ if (j && j.ok && j.config) sel.value = String(j.config.intervalHours || 0); })
+            .catch(function(){});
+        }
+        btnSave.addEventListener("click", function(){
+          fetch("/api/admin/backup-config", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ intervalHours: Number(sel.value) })
+          }).then(function(r){ return r.json(); })
+            .then(function(j){
+              if (j && j.ok) { showMsg("已保存", false); fetchCfg(); }
+              else showMsg("[" + (j && j.error_code || "?") + "] " + (j && j.message || "保存失败"), true);
+            })
+            .catch(function(e){ showMsg(String(e), true); });
+        });
+        btnNow.addEventListener("click", function(){
+          btnNow.disabled = true;
+          showMsg("备份中...", false);
+          fetch("/api/admin/backup-now", { method: "POST", credentials: "same-origin" })
+            .then(function(r){ return r.json(); })
+            .then(function(j){
+              if (j && j.ok) { showMsg("备份完成 " + (j.bytes ? ((j.bytes/1024/1024).toFixed(2) + " MB") : "") + " -> " + (j.path || ""), false); fetchCfg(); }
+              else showMsg("[" + (j && j.error_code || "?") + "] " + (j && j.message || "备份失败"), true);
+              btnNow.disabled = false;
+            })
+            .catch(function(e){ showMsg(String(e), true); btnNow.disabled = false; });
+        });
+        fetchCfg();
+      })();
+      </script>
     </section>
   </div>
 </main>

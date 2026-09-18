@@ -13,6 +13,7 @@ import { recordPublicBaseUrl, getCachedPublicBaseUrl } from "./domain.mjs";
 import * as admin from "./admin.mjs";
 import * as storage from "./storage.mjs";
 import * as auth from "./auth.mjs";
+import * as backupCfg from "./backup-config.mjs";
 import { start as startBot, Bot } from "weixin-agent-sdk";
 import { agent } from "./agent.mjs";
 
@@ -506,6 +507,8 @@ function renderAdminDashboard(req, session) {
     return null;
   }
   var user = (session && session.user) || "—";
+  var __bk = { intervalHours: 24, lastBackupAt: null, lastBackupFile: null, lastBackupSize: 0, lastResult: null, lastError: "" };
+  try { __bk = backupCfg.getBackupConfig(); } catch (_) {}
   var loginAt = new Date((session && session.createdAt) || Date.now()).toLocaleString("zh-CN");
   var hasEnv = false;
   try { hasEnv = !!(auth.hasEnvOverride && auth.hasEnvOverride()); } catch (_) {}
@@ -574,6 +577,12 @@ function renderAdminDashboard(req, session) {
     "{{publicBaseUrl}}": adminHtmlEscape(publicBaseUrl),
     "{{uptime}}": adminHtmlEscape(upStr),
     "{{dataSize}}": adminHtmlEscape(dataSize),
+    "{{lastBackupAt}}": __bk.lastBackupAt ? new Date(__bk.lastBackupAt).toLocaleString("zh-CN") : "从未备份",
+    "{{lastBackupFile}}": __bk.lastBackupFile || "—",
+    "{{lastBackupSize}}": __bk.lastBackupSize ? ((__bk.lastBackupSize/1024/1024).toFixed(2) + " MB") : "—",
+    "{{intervalHours}}": String(__bk.intervalHours || 0),
+    "{{bkLastResult}}": __bk.lastResult === "failed" ? "失败" : (__bk.lastResult === "ok" ? "成功" : "—"),
+    "{{bkLastError}}": adminHtmlEscape(__bk.lastError || ""),
   };
   for (var k in repl) {
     if (Object.prototype.hasOwnProperty.call(repl, k)) {
@@ -867,6 +876,52 @@ var server = http.createServer(async function(req, res) {
       return;
     }
 
+
+    // --- /api/admin/backup-config：读取自动备份配置（GET，需登录） ---
+    if (u.pathname === '/api/admin/backup-config' && req.method === 'GET') {
+      if (!req.session) { res.writeHead(302, { location: '/admin/login' }); res.end(); return; }
+      try {
+        var __bkCfg = backupCfg.getBackupConfig();
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, config: __bkCfg }));
+      } catch (e) {
+        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error_code: (e && e.error_code) || 'WXD-SYS-0003', message: (e && e.message) || String(e), stage: (e && e.stage) || 'server.mjs#/api/admin/backup-config' }));
+      }
+      return;
+    }
+
+    // --- /api/admin/backup-config：更新间隔（POST，需登录） ---
+    if (u.pathname === '/api/admin/backup-config' && req.method === 'POST') {
+      if (!req.session) { res.writeHead(302, { location: '/admin/login' }); res.end(); return; }
+      var __bcBody = '';
+      req.on('data', function (c) { __bcBody += c; });
+      req.on('end', function () {
+        var __bcParams = {};
+        try { __bcParams = JSON.parse(__bcBody || '{}'); } catch (_) { __bcParams = {}; }
+        var __hours = Number(__bcParams.intervalHours);
+        var __bcRes = backupCfg.setBackupConfig(__hours);
+        try { auth.appendAudit({ ip: req.socket.remoteAddress || '?', user: req.session.user, action: 'set_backup_config', ok: __bcRes && __bcRes.ok, error_code: __bcRes && __bcRes.error_code }); } catch (_) {}
+        res.writeHead(__bcRes && __bcRes.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(__bcRes));
+      });
+      return;
+    }
+
+    // --- /api/admin/backup-now：立即备份（POST，需登录） ---
+    if (u.pathname === '/api/admin/backup-now' && req.method === 'POST') {
+      if (!req.session) { res.writeHead(302, { location: '/admin/login' }); res.end(); return; }
+      try {
+        var __bkRes = await backupCfg.runBackupNow();
+        try { auth.appendAudit({ ip: req.socket.remoteAddress || '?', user: req.session.user, action: 'backup_now', ok: __bkRes && __bkRes.ok, error_code: __bkRes && __bkRes.error_code }); } catch (_) {}
+        res.writeHead(__bkRes && __bkRes.ok ? 200 : 500, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(__bkRes));
+      } catch (e) {
+        res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error_code: 'WXD-SYS-0002', message: e.message, stage: e.stage }));
+      }
+      return;
+    }
     // --- /admin：控制台首页（带守卫 + 数据注入） ---
     if (u.pathname === "/admin" || u.pathname === "/admin/") {
       if (!auth.isInitialized()) { res.writeHead(302, { location: "/admin/setup" }); res.end(); return; }
@@ -1032,6 +1087,8 @@ var server = http.createServer(async function(req, res) {
     process.exit(1);
     return;
   }
+  // 自动备份调度器（依赖 auth/storage 已初始化）
+  try { backupCfg.startBackupScheduler(); } catch (_) {}
   server.listen(PORT, "127.0.0.1", function(){
     console.log("ready · http://127.0.0.1:" + PORT);
   });
