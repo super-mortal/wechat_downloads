@@ -200,9 +200,12 @@ test("f. URL 命中 + 新增 → 返回一行 URL（落盘 + 写索引）", asyn
   const reply = await agent.chat({ text: SAMPLE_URL, conversationId: "c1" });
   assert.equal(typeof reply.text, "string");
   // 一行 URL：以 http(s):// 开头，含 /wechat/download/<slug>.html，不带换行 / 不带 emoji
-  assert.match(reply.text, /^https?:\/\/.+\/wechat\/download\/.+\.html$/, "回执必须是单行 URL");
-  assert.ok(!reply.text.includes("\n"), "回执不应带换行（必须一行 URL）");
-  assert.ok(!reply.text.includes("data/md"), "回执不应含本地路径 data/md");
+  // v3：回执两行（标题在上，URL 在下）
+  const lines = reply.text.split("\n");
+  assert.ok(lines.length === 2, "回执应为两行（标题 + URL），实际：" + reply.text);
+  assert.match(lines[0], /新增文章标题/, "第一行应为标题");
+  assert.match(lines[1], /^https?:\/\/.+\/wechat\/download\/.+\.html$/, "第二行必须是 URL");
+  assert.ok(!lines[1].includes("data/md"), "URL 行不应含本地路径 data/md");
   assert.ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(reply.text), "回执不应含 emoji");
 
   // 验证落盘：data/md/<slug>.md 存在，public/wechat/download/<slug>.html 存在
@@ -236,7 +239,11 @@ test("g. URL 命中 + 已存在 → 复用旧 URL，不重复抓取", async () =
   assert.equal(typeof reply.text, "string");
   assert.equal(called, 0, "重复 URL 时不应调用 downloadArticle");
   // 回执 URL 应包含旧 slug
-  assert.ok(reply.text.endsWith("/wechat/download/" + oldSlug + ".html"), "应复用旧 slug 的 URL");
+  // v3：两行回执，最后一行是 URL
+  const gLines = reply.text.split("\n");
+  assert.ok(gLines.length === 2, "回执应为两行");
+  assert.match(gLines[0], /旧标题/, "第一行应为旧标题");
+  assert.ok(gLines[1].endsWith("/wechat/download/" + oldSlug + ".html"), "应复用旧 slug 的 URL");
 
   // 索引仍只有一条
   const idx = await readIndex();

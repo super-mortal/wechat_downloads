@@ -75,7 +75,7 @@ function beijingIsoString(d) {
   return p.y + "-" + p.m + "-" + p.dd + "T" + p.hh + ":" + p.mi + ":" + p.ss + "+08:00";
 }
 
-// ---- slug 规则：<yyyy-mm-dd>-<title-kebab>-<hash6> ----
+// ---- slug 规则：v3 = <yyyy-mm-dd>-<hash6>（title 不进 URL） ----
 //   title-kebab 思路：去掉控制字符、空白替换为 -、去掉连续 -、首尾 -
 //   中文保留（不强求 kebab），遇到 ASCII 之外字符直接保留
 function slugifyTitle(title) {
@@ -96,9 +96,8 @@ export function buildSlug(url, title, now) {
   }
   const d = now instanceof Date ? now : new Date();
   const dateStr = beijingDateString(d);
-  const titleKebab = slugifyTitle(title);
   const hash6 = crypto.createHash("md5").update(url).digest("hex").slice(0, 6);
-  return dateStr + "-" + titleKebab + "-" + hash6;
+  return dateStr + "-" + hash6;
 }
 
 // ---- 原子写（tmp + rename） ----

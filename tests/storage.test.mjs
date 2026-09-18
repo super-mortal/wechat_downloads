@@ -103,14 +103,14 @@ function mkUrl(slug) {
 
 // ============ buildSlug ============
 
-test("buildSlug: 同一 url + title + 时间 → 同一 slug（含稳定 hash6）", () => {
+test("buildSlug v3: 同一 url + 时间 → 同一 slug（仅 date+hash6）", () => {
   const url = mkUrl("FtWvOWI2kVVS_1sQiKNWbw");
   const a = buildSlug(url, "示例文章", FIXED_DATE);
   const b = buildSlug(url, "示例文章", FIXED_DATE);
   assert.equal(a, b);
-  // 形如 <yyyy-mm-dd>-<title-kebab>-<hash6>
+  // v3 形如 <yyyy-mm-dd>-<hash6>，title 不再进 URL
   const expectedHash = crypto.createHash("md5").update(url).digest("hex").slice(0, 6);
-  assert.equal(a, "2026-09-17-示例文章-" + expectedHash);
+  assert.equal(a, "2026-09-17-" + expectedHash);
 });
 
 test("buildSlug: 中文 title 不抛错（保留中文字符）", () => {
@@ -121,20 +121,20 @@ test("buildSlug: 中文 title 不抛错（保留中文字符）", () => {
   assert.match(s, /^\d{4}-\d{2}-\d{2}-.+/);
 });
 
-test("buildSlug: 空白转 -，连续 - 合并，首尾 - 去掉", () => {
+test("buildSlug v3: title 不进 URL（仅 date+hash6）", () => {
   const url = mkUrl("zzz111");
   const s = buildSlug(url, "  hello   world  ", FIXED_DATE);
-  // hello world → hello-world
+  // v3 不再处理 title → 直接 hash
   const expectedHash = crypto.createHash("md5").update(url).digest("hex").slice(0, 6);
-  assert.equal(s, "2026-09-17-hello-world-" + expectedHash);
+  assert.equal(s, "2026-09-17-" + expectedHash);
 });
 
-test("buildSlug: 非法字符（/ \\ : * ? \" < > |）被剥除", () => {
+test("buildSlug v3: 非法字符不影响 slug（title 不进 URL）", () => {
   const url = mkUrl("ccc333");
   const s = buildSlug(url, "a/b\\c:d*e?f\"g<h>i|j", FIXED_DATE);
   // 非法字符被剥除后剩 "abcdefghij"，再合并 -、去首尾 -
   const expectedHash = crypto.createHash("md5").update(url).digest("hex").slice(0, 6);
-  assert.equal(s, "2026-09-17-abcdefghij-" + expectedHash);
+  assert.equal(s, "2026-09-17-" + expectedHash);
 });
 
 test("buildSlug: 空 url 抛 StorageError WXD-STORAGE-0002", () => {

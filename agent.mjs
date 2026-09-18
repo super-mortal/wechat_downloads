@@ -137,8 +137,11 @@ async function downloadAndReply(url, baseUrl) {
     return { text: TEXT_FETCH_FAIL };
   }
 
-  // 回执（仅一行 URL）
-  return { text: `${baseUrl}/wechat/download/${slug}.html` };
+  // 回执（v3：标题在上，URL 在下；微信会把第二行的 URL 自动识别成可点链接卡片）
+  const urlLine = `${baseUrl}/wechat/download/${slug}.html`;
+  const titleLine = title && title !== "未命名" ? title : "";
+  const text = titleLine ? (titleLine + "\n" + urlLine) : urlLine;
+  return { text };
 }
 
 /**
@@ -185,7 +188,10 @@ export const agent = {
     try {
       const existing = await findByUrl(url);
       if (existing && existing.html_url) {
-        return { text: `${baseUrl}${existing.html_url}` };
+        const urlLine2 = `${baseUrl}${existing.html_url}`;
+        const titleLine2 = existing.title && existing.title !== "未命名" ? existing.title : "";
+        const text2 = titleLine2 ? (titleLine2 + "\n" + urlLine2) : urlLine2;
+        return { text: text2 };
       }
     } catch (_) {
       // findByUrl 失败：忽略，继续走抓取分支

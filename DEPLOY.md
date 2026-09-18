@@ -234,13 +234,13 @@ proxy_set_header X-Forwarded-Host  $host;
 | `public/wechat/download/<slug>.html` | 渲染好的单篇 HTML（公网可访问） |
 | `data/index.json` | 文章索引（slug / 标题 / 作者 / URL / 时间等） |
 
-`slug` 规则（见 DEV_PLAN §9.3）：
+`slug` 规则（v3，见 storage.mjs#buildSlug）：
 
 ```
-<yyyy-mm-dd>-<title-kebab>-<6位hash>
+<yyyy-mm-dd>-<6位hash>
 ```
 
-例：`2026-09-17-title-FtWvOW`。
+例：`2026-09-17-FtWvOW`。**title 不再进 URL**（中文 / 特殊字符 / 长度都不影响 slug），只存在 `data/index.json` 的 `title` 字段里。同一 URL 永远同一 slug（含 hash 稳定）。
 
 > 这些目录**首次启动时会自动创建**。`.gitignore` 已经把 `data/md/` 和 `public/wechat/download/*.html` / `*.json` 排除，**不会被提交到 git**。
 
@@ -253,17 +253,19 @@ proxy_set_header X-Forwarded-Host  $host;
 用户发 `https://mp.weixin.qq.com/s/FtWvOWI2kVVS_1sQiKNWbw`，回执：
 
 ```
-https://your.domain.com/wechat/download/2026-09-17-程序员必备的10个终端技巧-FtWvOW.html
+我用workbuddy手搓了一个爆款视频反推skill，一键复刻
+https://your.domain.com/wechat/download/2026-09-17-a7174c.html
 ```
 
-**就这一行**——微信会自动转成可点的链接卡片。无标题、无本地路径、无 emoji。
+**v3 起两行**：第一行是标题（一眼看到是啥），第二行是阅读 URL（微信会自动转成可点的链接卡片）。无本地路径、无 emoji。
 
 ### 11.2 重复收录
 
-已经抓过同一 URL，回执仍然是已有 URL（一行，不重复抓取）：
+已经抓过同一 URL，回执仍然是已有 URL（两行，不重复抓取）：
 
 ```
-https://your.domain.com/wechat/download/2026-09-17-xxx-FtWvOW.html
+原文章标题
+https://your.domain.com/wechat/download/2026-09-17-a7174c.html
 ```
 
 ### 11.3 抓取失败
@@ -393,6 +395,8 @@ proxy_set_header X-Forwarded-Host  $host;     # ← 必须
 ---
 
 > 文档同步自 `DEV_PLAN.md` §5.3 / §7.x / §9.x / §10.3。
-> 修订：v1 · 2026-09-17
+> 修订：v3 · 2026-09-18 · slug 简化为 `<date>-<hash6>` + 回执两行
+> · v2 · 2026-09-18 · domain 缓存文件持久化
+> · v1 · 2026-09-17
 
 
