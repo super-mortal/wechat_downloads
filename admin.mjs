@@ -104,6 +104,26 @@ function parseQrFromLogMessage(msg) {
   return m ? m[1] : null;
 }
 
+// bot lifecycle: login 成功后必须 startWeixinBot() 拉起长轮询
+// 否则 server.mjs 启动时 start() 因未登录已失败，登录后没人接管监听
+var _currentBot = null;
+var _currentBotAccountId = null;
+
+export async function ensureBotRunning() {
+  if (!isLoggedIn()) return null;
+  if (_currentBot && _currentBotAccountId) return _currentBot;
+  try {
+    var bot = await startWeixinBot(agent, { log: function (msg) { console.log("[wechat-bot] " + msg); } });
+    _currentBot = bot;
+    _currentBotAccountId = bot && bot.accountId ? bot.accountId : "default";
+    console.log("[admin] bot monitor started, account=" + _currentBotAccountId);
+    return bot;
+  } catch (err) {
+    console.error("[admin] ensureBotRunning failed:", err && err.message);
+    return null;
+  }
+}
+
 export function isBotEnabled() {
   return process.env.WECHAT_BOT !== "0" && process.env.WECHAT_BOT !== "false";
 }
@@ -159,8 +179,10 @@ export async function startQrSession() {
   sessions.set(sessionKey, session);
 
   // 监听后台 login() 完成：成功 → confirmed；失败 → expired
-  loginPromise.then(function () {
+  loginPromise.then(async function () {
     if (sessions.get(sessionKey) === session) session.status = "confirmed";
+    // login 成功 → 拉起长轮询监听（启动时 start() 因未登录已失败）
+    await ensureBotRunning();
   }, function () {
     if (sessions.get(sessionKey) === session) session.status = "expired";
   });

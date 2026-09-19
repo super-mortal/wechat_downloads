@@ -16,7 +16,7 @@ import * as admin from "./admin.mjs";
 import * as storage from "./storage.mjs";
 import * as auth from "./auth.mjs";
 import * as backupCfg from "./backup-config.mjs";
-import { start as startBot, Bot } from "weixin-agent-sdk";
+// weixin-agent-sdk 通过 admin.mjs 间接使用（ensureBotRunning）
 import { agent } from "./agent.mjs";
 
 const PORT = Number(process.env.PORT) || 3915;
@@ -1144,29 +1144,16 @@ function gracefulShutdown(signal) {
 process.on("SIGTERM", function () { gracefulShutdown("SIGTERM"); });
 process.on("SIGINT", function () { gracefulShutdown("SIGINT"); });
 
-// 可选：WECHAT_BOT=1 时把 agent 接入 weixin-agent-sdk 长轮询（DEV_PLAN.md §10.3 / §A.2）
 // bot 默认开启（部署完就能扫码绑定）；设 WECHAT_BOT=0 显式关闭
+// 注意：start() 会因未登录失败；登录成功后由 admin.mjs#ensureBotRunning() 自动接管
 if (process.env.WECHAT_BOT !== "0" && process.env.WECHAT_BOT !== "false") {
-  (async () => {
-    const log = (msg) => console.log("[wechat-bot]", msg);
-    try {
-      // SDK 真实签名（weixin-agent-sdk@0.5.0 dist/index.d.mts）：
-      //   start(agent: Agent, opts?: StartOptions): Bot
-      //   StartOptions = { accountId?, abortSignal?, log?: (msg: string) => void }
-      // start() 内部启动 monitor 后立即返回 Bot 实例；bot.wait() 才阻塞至 monitor 退出。
-      // 本场景 HTTP 已保活进程，故不 await bot.wait()。
-      const bot = await startBot(agent, { log });
-      console.log("[wechat-bot] bot started", { type: typeof bot, isBot: bot instanceof Bot });
-    } catch (err) {
-      // 启动失败（未登录 / 二维码未扫 / 长轮询断开）：按 dev-spec.md WXD-NET-0002 登记
-      console.error("[wechat-bot] start failed", {
-        error_code: "WXD-NET-0002",
-        message: (err && err.message) || String(err),
-        stage: "server.mjs#WECHAT_BOT=1",
-      });
-      // 不退出进程；HTTP 仍可用
-    }
-  })().catch(err => console.error("[wechat-bot] uncaught", err));
+  // 服务启动时尝试拉起 bot monitor（如果已登录则成功；未登录会安静失败，等扫码后由 admin 接管）
+  admin.ensureBotRunning().then(function (bot) {
+    if (bot) console.log("[server] bot monitor started at boot");
+    else console.log("[server] bot not started at boot (will auto-start after WeChat scan)");
+  }).catch(function (err) {
+    console.error("[server] ensureBotRunning failed:", err && err.message);
+  });
 }
 
 
