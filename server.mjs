@@ -1,10 +1,12 @@
-// server.mjs - 本地 HTTP 服务
-//   * OFF + 单条 URL：后端返 JSON 清单，前端 fetch().blob() 逐个触发原生下载
-//   * OFF + batch / ON + 任意：后端流式返 application/zip
-
+// server.mjs - HTTPS service (HTTP/HTTPS switch via HTTP_MODE env)
+//   * Default: HTTPS (self-signed cert auto-generated on first start, listens on 0.0.0.0)
+//   * HTTP_MODE=1: fall back to HTTP (for Nginx reverse proxy / local debug)
+//   * TLS_CERT / TLS_KEY env: external PEM files (for production with real certs)
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs/promises";
+import https from "node:https";
+import { getTlsCert, isHttpMode, getTlsCertPath } from "./tls-cert.mjs";
 import { statSync, readFileSync, existsSync, readdirSync as fsReaddirSync, mkdirSync, writeFileSync, renameSync, chmodSync } from "node:fs";
 import { downloadArticle } from "./article.mjs";
 import { openBrowser, dispose } from "./engine.mjs";
@@ -592,7 +594,7 @@ function renderAdminDashboard(req, session) {
   return html;
 }
 
-var server = http.createServer(async function(req, res) {
+var __requestHandler = async function(req, res) {
 
   try {
     domainMiddleware(req, res);
@@ -1064,7 +1066,8 @@ var server = http.createServer(async function(req, res) {
   } catch (e) {
     try { res.writeHead(500, { "content-type": "text/plain" }); res.end("Server error: " + e.message); } catch(_) {}
   }
-});
+};
+var server = null;
 
 // ---- 启动钩子：initAuth + storage.init → 失败写 audit 后退出（§六.C） ----
 //   * auth.mjs#initAuth：读回 data/auth.json + data/sessions.json；auth 损坏 → 抛 WXD-AUTH-0006
@@ -1089,8 +1092,28 @@ var server = http.createServer(async function(req, res) {
   }
   // 自动备份调度器（依赖 auth/storage 已初始化）
   try { backupCfg.startBackupScheduler(); } catch (_) {}
-  server.listen(PORT, "127.0.0.1", function(){
-    console.log("ready · http://127.0.0.1:" + PORT);
+  // HTTP / HTTPS selection: HTTPS is the default
+  if (isHttpMode()) {
+    server = http.createServer(__requestHandler);
+    console.log("[server] HTTP_MODE=1, serving plain HTTP (intended for Nginx reverse proxy / local debug)");
+  } else {
+    try {
+      var tlsCert = await getTlsCert({ hosts: ["localhost", "127.0.0.1"] });
+      server = https.createServer({ cert: tlsCert.cert, key: tlsCert.key }, __requestHandler);
+    } catch (e) {
+      console.error("[server] TLS init failed:", e && e.message);
+      process.exit(1);
+      return;
+    }
+  }
+  var bindAddr = process.env.BIND || "0.0.0.0";
+  server.listen(PORT, bindAddr, function(){
+    var proto = isHttpMode() ? "http" : "https";
+    console.log("ready · " + proto + "://" + bindAddr + ":" + PORT);
+    if (!isHttpMode()) {
+      var certInfo = getTlsCertPath();
+      console.log("       · TLS cert: " + certInfo.certPath);
+    }
   });
 })();
 
@@ -1144,5 +1167,10 @@ if (process.env.WECHAT_BOT === "1") {
     }
   })().catch(err => console.error("[wechat-bot] uncaught", err));
 }
+
+
+
+
+
 
 
