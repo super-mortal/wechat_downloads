@@ -1145,7 +1145,8 @@ process.on("SIGTERM", function () { gracefulShutdown("SIGTERM"); });
 process.on("SIGINT", function () { gracefulShutdown("SIGINT"); });
 
 // 可选：WECHAT_BOT=1 时把 agent 接入 weixin-agent-sdk 长轮询（DEV_PLAN.md §10.3 / §A.2）
-if (process.env.WECHAT_BOT === "1") {
+// bot 默认开启（部署完就能扫码绑定）；设 WECHAT_BOT=0 显式关闭
+if (process.env.WECHAT_BOT !== "0" && process.env.WECHAT_BOT !== "false") {
   (async () => {
     const log = (msg) => console.log("[wechat-bot]", msg);
     try {

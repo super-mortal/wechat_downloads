@@ -105,13 +105,13 @@ function parseQrFromLogMessage(msg) {
 }
 
 export function isBotEnabled() {
-  return process.env.WECHAT_BOT === "1" || process.env.WECHAT_BOT === "true";
+  return process.env.WECHAT_BOT !== "0" && process.env.WECHAT_BOT !== "false";
 }
 
 export async function startQrSession() {
   if (!isBotEnabled()) {
     const rid = randomUUID();
-    throw new AdminError("WXD-BOT-0001", STAGE.startQrSession, rid, { hint: "请用 WECHAT_BOT=1 npm start 启动服务" });
+    throw new AdminError("WXD-BOT-0001", STAGE.startQrSession, rid, { hint: "服务启动时 bot 默认开启；如需关闭设 WECHAT_BOT=0" });
   }
   const requestId = randomUUID();
   const sessionKey = randomUUID();

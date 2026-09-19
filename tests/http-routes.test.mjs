@@ -86,7 +86,7 @@ before(async () => {
   // 2) spawn server
   serverProc = spawn(process.execPath, [SERVER_ENTRY], {
     cwd: PROJECT_ROOT,
-    env: { ...process.env, WECHAT_BOT: "" },
+    env: { ...process.env, WECHAT_BOT: "0" },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
